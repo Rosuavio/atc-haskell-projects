@@ -2,8 +2,9 @@ module Main where
 
 import System.IO (hFlush, stdout)
 import Data.List (stripPrefix)
-import Control.Monad.Trans.Writer (WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (lift)
+import GHC.List (List)
+import Control.Monad.Trans.State (StateT, evalStateT, modify)
 
 data Input
   = Exit
@@ -13,10 +14,10 @@ data Input
 main :: IO ()
 main = do
   putStrLn "Welcome to my TODO List Manager!"
-  _ <- execWriterT loop
+  _ <- evalStateT loop []
   pure ()
 
-loop :: WriterT String IO ()
+loop :: StateT (List String) IO ()
 loop = do
   input <- parseInput <$> lift getInput
   case input of
@@ -25,7 +26,7 @@ loop = do
       pure ()
     Add task -> do
       lift $ putStrLn $ "Task \"" ++ task ++ "\" added to the to-do list."
-      tell task
+      modify (task :)
       loop
     Invaid invalidInput -> do
       lift $ putStrLn $ "Invaid invalidInput: " ++ invalidInput
