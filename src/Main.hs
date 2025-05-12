@@ -1,8 +1,9 @@
 module Main where
 
 import System.IO (hFlush, stdout)
-import GHC.List (List)
 import Data.List (stripPrefix)
+import Control.Monad.Trans.Writer (WriterT, execWriterT, tell)
+import Control.Monad.Trans.Class (lift)
 
 data Input
   = Exit
@@ -12,23 +13,24 @@ data Input
 main :: IO ()
 main = do
   putStrLn "Welcome to my TODO List Manager!"
-  _ <- loop []
+  _ <- execWriterT loop
   pure ()
 
-loop :: List String ->  IO (List String)
-loop s = do
-  input <- parseInput <$> getInput
+loop :: WriterT String IO ()
+loop = do
+  input <- parseInput <$> lift getInput
   case input of
     Exit -> do
-      putStrLn "Goodbye!"
-      pure s
+      lift $ putStrLn "Goodbye!"
+      pure ()
     Add task -> do
-      putStrLn $ "Task \"" ++ task ++ "\" added to the to-do list."
-      loop $ task : s
+      lift $ putStrLn $ "Task \"" ++ task ++ "\" added to the to-do list."
+      tell task
+      loop
     Invaid invalidInput -> do
-      putStrLn $ "Invaid invalidInput: " ++ invalidInput
-      putStrLn "Please provide valid input."
-      loop s
+      lift $ putStrLn $ "Invaid invalidInput: " ++ invalidInput
+      lift $ putStrLn "Please provide valid input."
+      loop
 
 parseInput :: String -> Input
 parseInput "exit" = Exit
