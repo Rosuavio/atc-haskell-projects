@@ -5,7 +5,7 @@ import Control.Monad (when)
 
 data Input
   = Exit
-  | Other String
+  | Invaid String
   deriving Eq
 
 main :: IO ()
@@ -21,11 +21,13 @@ loop = do
 
 handlInput :: Input -> IO ()
 handlInput Exit = putStrLn "Goodbye!"
-handlInput (Other input) = putStrLn $ "You entered: " ++ input
+handlInput (Invaid input) = do
+  putStrLn $ "Invaid input: " ++ input
+  putStrLn "Please provide valid input."
 
 parseInput :: String -> Input
 parseInput "exit" = Exit
-parseInput input = Other input
+parseInput input = Invaid input
 
 getInput :: IO String
 getInput = do
