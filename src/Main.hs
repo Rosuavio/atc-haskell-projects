@@ -15,9 +15,7 @@ main = do
 
 loop :: IO ()
 loop = do
-  putStr "Enter command: "
-  hFlush stdout
-  input <- getLine
+  input <- getInput
   handledInput <- handleInput input
   when (handledInput /= Exit) loop
 
@@ -28,3 +26,9 @@ handleInput "exit" = do
 handleInput input = do
   putStrLn $ "You entered: " ++ input
   pure Other
+
+getInput :: IO String
+getInput = do
+  putStr "Enter command: "
+  hFlush stdout
+  getLine
