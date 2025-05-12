@@ -3,6 +3,11 @@ module Main where
 import System.IO (hFlush, stdout)
 import Control.Monad (when)
 
+data Input
+  = Exit
+  | Other
+  deriving Eq
+
 main :: IO ()
 main = do
   putStrLn "Welcome to my TODO List Manager!"
@@ -13,13 +18,13 @@ loop = do
   putStr "Enter command: "
   hFlush stdout
   input <- getLine
-  isLooping <- handleInput input
-  when isLooping loop
+  handledInput <- handleInput input
+  when (handledInput /= Exit) loop
 
-handleInput :: String -> IO Bool
+handleInput :: String -> IO Input
 handleInput "exit" = do
   putStrLn "Goodbye!"
-  pure False
+  pure Exit
 handleInput input = do
   putStrLn $ "You entered: " ++ input
-  pure True
+  pure Other
