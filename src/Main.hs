@@ -5,7 +5,7 @@ import Control.Monad (when)
 
 data Input
   = Exit
-  | Other
+  | Other String
   deriving Eq
 
 main :: IO ()
@@ -15,17 +15,17 @@ main = do
 
 loop :: IO ()
 loop = do
-  input <- getInput
-  handledInput <- handleInput input
-  when (handledInput /= Exit) loop
+  input <- parseInput <$> getInput
+  handlInput input
+  when (input /= Exit) loop
 
-handleInput :: String -> IO Input
-handleInput "exit" = do
-  putStrLn "Goodbye!"
-  pure Exit
-handleInput input = do
-  putStrLn $ "You entered: " ++ input
-  pure Other
+handlInput :: Input -> IO ()
+handlInput Exit = putStrLn "Goodbye!"
+handlInput (Other input) = putStrLn $ "You entered: " ++ input
+
+parseInput :: String -> Input
+parseInput "exit" = Exit
+parseInput input = Other input
 
 getInput :: IO String
 getInput = do
