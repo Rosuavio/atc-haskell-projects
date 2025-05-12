@@ -1,6 +1,7 @@
 module Main where
 
 import System.IO (hFlush, stdout)
+import Control.Monad (when)
 
 main :: IO ()
 main = do
@@ -13,9 +14,7 @@ loop = do
   hFlush stdout
   input <- getLine
   isLooping <- handleInput input
-  if isLooping
-    then loop
-    else return ()
+  when isLooping loop
 
 handleInput :: String -> IO Bool
 handleInput "exit" = do
