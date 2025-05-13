@@ -1,12 +1,10 @@
 module Main where
 
 import System.IO (hFlush, stdout)
-import Control.Monad (when)
 
 data Input
   = Exit
   | Invaid String
-  deriving Eq
 
 main :: IO ()
 main = do
@@ -16,14 +14,12 @@ main = do
 loop :: IO ()
 loop = do
   input <- parseInput <$> getInput
-  handlInput input
-  when (input /= Exit) loop
-
-handlInput :: Input -> IO ()
-handlInput Exit = putStrLn "Goodbye!"
-handlInput (Invaid input) = do
-  putStrLn $ "Invaid input: " ++ input
-  putStrLn "Please provide valid input."
+  case input of
+    Exit -> putStrLn "Goodbye!"
+    Invaid invalidInput -> do
+      putStrLn $ "Invaid invalidInput: " ++ invalidInput
+      putStrLn "Please provide valid input."
+      loop
 
 parseInput :: String -> Input
 parseInput "exit" = Exit
