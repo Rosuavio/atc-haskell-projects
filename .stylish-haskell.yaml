@@ -1,4 +1,6 @@
 steps:
+  - module_header:
+      indent: 2
   - imports:
       align: none
       long_list_align: multiline
