@@ -3,18 +3,18 @@ module Main where
 import Control.Monad (when)
 import System.Directory.OsPath
   ( Permissions (readable)
-  , XdgDirectory (XdgState)
   , doesFileExist
   , getPermissions
-  , getXdgDirectory
   )
-import System.OsPath (decodeFS, unsafeEncodeUtf)
+import System.OsPath (decodeFS)
 
 import Data.ByteString as BS
 
+import Util
+
 main :: IO ()
 main = do
-  todoFilePath <- getXdgDirectory XdgState $ unsafeEncodeUtf "todo"
+  todoFilePath <- getDefaultFile
   canRead <- doesFileExist todoFilePath >>= \case
     False -> pure False
     True -> readable <$> getPermissions todoFilePath
