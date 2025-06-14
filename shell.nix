@@ -12,5 +12,12 @@ in pkgs.mkShell {
 
   shellHook = ''
     cabal update
+
+    dev() {
+      cabal build
+
+      $TERM ghciwatch --command 'cabal repl' --watch src --clear > /dev/null 2>&1 &
+      sleep 2s && $TERM cabal repl > /dev/null 2>&1 &
+    }
   '';
 }
