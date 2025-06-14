@@ -10,4 +10,8 @@ executable todo-manager
   hs-source-dirs:      src
   default-language:    GHC2024
   ghc-options:         -Wall
-  build-depends:       base >=4.7 && <5
+  build-depends:
+    base >=4.7 && <5,
+    directory,
+    filepath >= 1.5.2,
+    text

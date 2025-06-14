@@ -37,11 +37,11 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 
 ### Basic Functionality:
 - [ ] Users can add a new task to the to-do list.
-- [ ] Users can view all tasks in the to-do list.
+- [x] Users can view all tasks in the to-do list.
 - [ ] Users can mark a task as completed.
 - [ ] Users can delete a task from the list.
 - [ ] Users can edit a task’s description.
-- [ ] Tasks should be stored persistently (e.g., in a text file).
+- [x] Tasks should be stored persistently (e.g., in a text file).
 
 ### Advanced Features (Optional):
 - [ ] Allow users to prioritize tasks (e.g., High, Medium, Low).
@@ -63,7 +63,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 ## Acceptance Criteria:
 - [ ] **Task Management:**
   - [ ] The user can successfully add a new task, view it, mark it as complete, edit it, and delete it.
-  - [ ] Tasks persist between sessions (i.e., closing and reopening the application should not lose data).
+  - [x] Tasks persist between sessions (i.e., closing and reopening the application should not lose data).
 
 - [ ] **Advanced Features (if implemented):**
   - [ ] Tasks can be prioritized, and the list can be filtered or sorted as per user input.
@@ -71,7 +71,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 
 - [ ] **User Interface:**
   - [ ] The help menu is clear and correctly displays all available commands.
-  - [ ] Commands are intuitive and easy to use.
+  - [x] Commands are intuitive and easy to use.
 
 - [ ] **Error Handling:**
   - [ ] The application should not crash or behave unexpectedly when given invalid input (e.g., marking a non-existent task as complete).
