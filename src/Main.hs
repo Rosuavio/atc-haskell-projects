@@ -1,26 +1,22 @@
 module Main where
 
-import System.IO (hFlush, stdout)
+import Control.Monad (when)
+import System.Directory.OsPath
+  ( Permissions (readable)
+  , XdgDirectory (XdgState)
+  , doesFileExist
+  , getPermissions
+  , getXdgDirectory
+  )
+import System.OsPath (decodeFS, unsafeEncodeUtf)
+
+import Data.ByteString as BS
 
 main :: IO ()
 main = do
-  putStrLn "Welcome to my TODO List Manager!"
-  loop
-
-loop :: IO ()
-loop = do
-  putStr "Enter command: "
-  hFlush stdout
-  input <- getLine
-  isLooping <- handleInput input
-  if isLooping
-    then loop
-    else return ()
-
-handleInput :: String -> IO Bool
-handleInput "exit" = do
-  putStrLn "Goodbye!"
-  pure False
-handleInput input = do
-  putStrLn $ "You entered: " ++ input
-  pure True
+  todoFilePath <- getXdgDirectory XdgState $ unsafeEncodeUtf "todo"
+  canRead <- doesFileExist todoFilePath >>= \case
+    False -> pure False
+    True -> readable <$> getPermissions todoFilePath
+  when canRead $
+    BS.putStr =<< BS.readFile =<< decodeFS todoFilePath
