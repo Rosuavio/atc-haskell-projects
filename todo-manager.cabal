@@ -14,6 +14,7 @@ executable todo-manager
     Util
   build-depends:
     base >=4.7 && <5,
+    containers,
     directory,
     filepath >= 1.5.2,
     file-io,
