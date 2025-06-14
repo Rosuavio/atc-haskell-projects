@@ -16,4 +16,6 @@ executable todo-manager
     base >=4.7 && <5,
     directory,
     filepath >= 1.5.2,
-    text
+    file-io,
+    text,
+    terminal-size

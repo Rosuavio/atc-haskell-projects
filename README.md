@@ -37,7 +37,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 
 ### Basic Functionality:
 - [ ] Users can add a new task to the to-do list.
-- [x] Users can view all tasks in the to-do list.
+- [ ] Users can view all tasks in the to-do list.
 - [ ] Users can mark a task as completed.
 - [ ] Users can delete a task from the list.
 - [ ] Users can edit a task’s description.
