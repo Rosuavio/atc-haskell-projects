@@ -1,0 +1,7 @@
+steps:
+  - imports:
+      align: none
+      long_list_align: multiline
+      list_padding: 2
+columns: 80
+cabal: true
