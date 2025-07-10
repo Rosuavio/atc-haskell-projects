@@ -1,10 +1,17 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
-import Control.Monad (when)
-import Data.List (intersperse)
+import Control.Concurrent (forkIO)
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.Foldable (for_)
+import Data.Functor (void, ($>))
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import System.Console.Terminal.Size (Window (height), size)
+import Graphics.Vty (defaultConfig)
+import Graphics.Vty.CrossPlatform (mkVty)
+import Reflex
+import Reflex.Network
+import Reflex.Vty
 import System.Directory.OsPath
   ( Permissions (readable)
   , doesFileExist
@@ -13,17 +20,62 @@ import System.Directory.OsPath
 import System.File.OsPath (withFile)
 import System.IO (IOMode (ReadMode))
 
+import Control.Monad.Fix (MonadFix)
+import System.OsPath (OsPath)
 import Util
 
 main :: IO ()
-main = size >>= \case
-  Nothing -> pure ()
-  Just w -> do
-    todoFilePath <- getDefaultFile
-    canRead <- doesFileExist todoFilePath >>= \case
-      False -> pure False
-      True -> readable <$> getPermissions todoFilePath
-    when canRead $
-      withFile todoFilePath ReadMode $ \fileHandle -> do
-        ls <- hGetNLines fileHandle $ height w
-        mapM_ T.putStr $ intersperse (T.singleton '\n') ls
+main = do
+  vty <- mkVty defaultConfig
+  mainWidgetWithHandle vty $ initManager_ $ do
+    quitEv <- input
+    pb <- getPostBuild
+    defaultFileInfoEv <- performEventAsync $
+      pb $> \onComplete -> liftIO $ void $ forkIO $ do
+        f <- getDefaultFile
+        canRead <- doesFileExist f >>= \case
+          False -> pure False
+          True -> readable <$> getPermissions f
+        onComplete (f, canRead)
+    grout flex $ col $ do
+      void $ grout flex $ do
+        height <- displayHeight
+        networkHold
+          (text "Loading default file...")
+          $ ffor
+            (attach (current height) defaultFileInfoEv)
+            $ \(initialHeight, (filePath, canRead)) -> col $ case canRead of
+              False -> text $ constant $ "Can't raad file: "
+                <> T.pack (show filePath)
+              True -> fileView filePath initialHeight
+      grout (fixed $ constDyn 1) $ text "Press any key to continue..."
+    pure $ void quitEv
+
+fileView ::
+  ( PostBuild t m
+  , TriggerEvent t m
+  , PerformEvent t m
+  , MonadIO (Performable m)
+  , Adjustable t m
+  , HasInput t m
+  , HasLayout t m
+  , HasDisplayRegion t m
+  , HasImageWriter t m
+  , HasTheme t m
+  , HasFocusReader t m
+  , MonadHold t m
+  , MonadFix m
+  ) => OsPath -> Int -> m ()
+fileView filePath initialHeight = do
+  pb <- getPostBuild
+  readFileLines <- performEventAsync $ pb $> liftIO . void . forkIO
+    . (>>=) (withFile filePath ReadMode (`hGetNLines` initialHeight))
+  void $ networkHold
+    (text $ constant $ "file: " <> T.pack (show filePath))
+    $ ffor readFileLines $ \fileLines ->
+      fmap snd $ grout flex $ scrollable def $ col $ do
+        for_ fileLines $ \line ->
+          grout (fixed $ constDyn 1) $ text $ constant line
+        -- Event that signals an update to the contents of
+        -- scrollable
+        pure (never, ())

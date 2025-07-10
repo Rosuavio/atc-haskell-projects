@@ -9,7 +9,7 @@ executable todo-manager
   main-is:             Main.hs
   hs-source-dirs:      src
   default-language:    GHC2024
-  ghc-options:         -Wall
+  ghc-options:         -Wall -threaded
   other-modules:
     Util
   build-depends:
@@ -18,5 +18,8 @@ executable todo-manager
     directory,
     filepath >= 1.5.2,
     file-io,
+    reflex,
+    reflex-vty,
     text,
-    terminal-size
+    vty,
+    vty-crossplatform
