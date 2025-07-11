@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo #-}
 
 module Main where
 
@@ -6,6 +7,7 @@ import Control.Concurrent (forkIO)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Foldable (for_)
 import Data.Functor (void, ($>))
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import Graphics.Vty (defaultConfig)
 import Graphics.Vty.CrossPlatform (mkVty)
@@ -18,7 +20,7 @@ import System.Directory.OsPath
   , getPermissions
   )
 import System.File.OsPath (withFile)
-import System.IO (IOMode (ReadMode))
+import System.IO (IOMode (ReadMode), SeekMode (AbsoluteSeek), hSeek, hTell)
 
 import Control.Monad.Fix (MonadFix)
 import System.OsPath (OsPath)
@@ -63,20 +65,47 @@ fileView ::
   , HasFocusReader t m
   , MonadHold t m
   , MonadFix m
+  , NotReady t m
   ) => OsPath -> m ()
 fileView filePath = do
   pb <- getPostBuild
   height <- displayHeight
-  readFileLines <- performEventAsync $ flip fmap
-    (leftmost [current height `tag` pb, updated height])
+  getLinesRez <- performEventAsync $ flip fmap
+    (current height `tag` pb)
     $ \initialHeight -> liftIO . void . forkIO
-      . (>>=) (withFile filePath ReadMode (`hGetNLines` initialHeight))
+      . (>>=) (withFile filePath ReadMode $ \fh -> do
+        ls <- hGetNLines fh initialHeight
+        bottom <- hTell fh
+        pure (ls, bottom))
   void $ networkHold
     (text $ constant $ "file: " <> T.pack (show filePath))
-    $ ffor readFileLines $ \fileLines ->
+    $ ffor getLinesRez $ \initLinesInfo -> do
+      rec
+        let
+          heightPassedLines = fforMaybe
+            (attach (current linesInfo) (updated height))
+            $ \((l, b), h) ->
+              let delta = h - Seq.length l
+              in if delta > 0 then
+                Just (delta, b)
+                else Nothing
+        gotMoreLines <- performEventAsync $ ffor heightPassedLines
+          $ \(l, b) onComplete -> liftIO $ void $ forkIO $ do
+            fileLines <- withFile filePath ReadMode $ \fh -> do
+              hSeek fh AbsoluteSeek b
+              newLines <- hGetNLines fh l
+              nB <- hTell fh
+              pure (newLines, nB)
+            onComplete fileLines
+        linesInfo <- foldDyn
+          (\(nLines, nBottom) (cLines, _) ->
+            (cLines <> nLines, nBottom))
+          initLinesInfo
+          gotMoreLines
       fmap snd $ grout flex $ scrollable def $ col $ do
-        for_ fileLines $ \line ->
-          grout (fixed $ constDyn 1) $ text $ constant line
+        void $ networkView $ ffor linesInfo
+          $ \(fileLines, _) -> for_ fileLines $ \line ->
+            grout (fixed $ constDyn 1) $ text $ constant line
         -- Event that signals an update to the contents of
         -- scrollable
         pure (never, ())
