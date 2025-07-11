@@ -67,7 +67,8 @@ fileView ::
 fileView filePath = do
   pb <- getPostBuild
   height <- displayHeight
-  readFileLines <- performEventAsync $ flip fmap (current height `tag` pb)
+  readFileLines <- performEventAsync $ flip fmap
+    (leftmost [current height `tag` pb, updated height])
     $ \initialHeight -> liftIO . void . forkIO
       . (>>=) (withFile filePath ReadMode (`hGetNLines` initialHeight))
   void $ networkHold
