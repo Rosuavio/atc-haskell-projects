@@ -70,42 +70,52 @@ fileView ::
 fileView filePath = do
   pb <- getPostBuild
   height <- displayHeight
-  getLinesRez <- performEventAsync $ flip fmap
-    (current height `tag` pb)
-    $ \initialHeight -> liftIO . void . forkIO
-      . (>>=) (withFile filePath ReadMode $ \fh -> do
-        ls <- hGetNLines fh initialHeight
-        bottom <- hTell fh
-        pure (ls, bottom))
-  void $ networkHold
-    (text $ constant $ "file: " <> T.pack (show filePath))
-    $ ffor getLinesRez $ \initLinesInfo -> do
-      rec
-        let
-          heightPassedLines = fforMaybe
-            (attach (current linesInfo) (updated height))
-            $ \((l, b), h) ->
-              let delta = h - Seq.length l
-              in if delta > 0 then
-                Just (delta, b)
-                else Nothing
-        gotMoreLines <- performEventAsync $ ffor heightPassedLines
-          $ \(l, b) onComplete -> liftIO $ void $ forkIO $ do
-            fileLines <- withFile filePath ReadMode $ \fh -> do
-              hSeek fh AbsoluteSeek b
-              newLines <- hGetNLines fh l
-              nB <- hTell fh
-              pure (newLines, nB)
-            onComplete fileLines
-        linesInfo <- foldDyn
-          (\(nLines, nBottom) (cLines, _) ->
-            (cLines <> nLines, nBottom))
-          initLinesInfo
-          gotMoreLines
-      fmap snd $ grout flex $ scrollable def $ col $ do
-        void $ networkView $ ffor linesInfo
-          $ \(fileLines, _) -> for_ fileLines $ \line ->
-            grout (fixed $ constDyn 1) $ text $ constant line
-        -- Event that signals an update to the contents of
-        -- scrollable
-        pure (never, ())
+  rec
+    let
+      needNLinesEv = attachWithMaybe
+        calLinesToGet
+        (current $ Seq.length <$> loadedLines)
+        $ leftmost [ updated height, current height `tag` pb]
+
+    -- TODO: This can be running while a new needNLinesEv comes through...
+    -- Figure the more effecent way of dealing with it.
+    -- Right now, it seems like the IO happens to complete in the same sequence
+    -- that the needNLinesEv come in. This is good because we dont get lines
+    -- back out of order, but it only happens to work (maybe because `withFile`
+    -- locks the reasource and holds up next `withFile`s untill it closes.
+    --
+    -- What we can do?
+    -- If new needNLinesEv comes before this returns we can cancel it or
+    -- something and let the new IO happen. It should still old bottomPos and
+    -- a the lines requested should be more.
+    --
+    -- Maybe use some kind of debounceing
+    gotLinesInfo <- performEventAsync
+      $ ffor (attach (current bottomPos) needNLinesEv)
+        $ \(b, getNMoreLines) onComplete -> liftIO $ void $ forkIO $
+          getLinesFromPos b getNMoreLines >>= onComplete
+
+    (bottomPos, loadedLines) <- splitDynPure <$> accum
+      (\(_, cLines) (nBottom, nLines) -> (nBottom, cLines <> nLines))
+      (0, mempty)
+      gotLinesInfo
+  fmap snd $ grout flex $ scrollable def $ col $ do
+    void $ networkView $ ffor loadedLines $ \fileLines ->
+      for_ fileLines $ \line ->
+        grout (fixed $ constDyn 1) $ text $ constant line
+
+    -- Event that signals an update to the contents of
+    -- scrollable
+    pure (never, ())
+  where
+    getLinesFromPos pos numToGet = withFile filePath ReadMode $ \fh -> do
+      hSeek fh AbsoluteSeek pos
+      newLines <- hGetNLines fh numToGet
+      nB <- hTell fh
+      pure (nB, newLines)
+
+    calLinesToGet numOfLines heightOfScreen = if delta > 0
+      then Just delta
+      else Nothing
+      where
+        delta = heightOfScreen - numOfLines
