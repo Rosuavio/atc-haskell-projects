@@ -39,15 +39,13 @@ main = do
         onComplete (f, canRead)
     grout flex $ col $ do
       void $ grout flex $ do
-        height <- displayHeight
         networkHold
           (text "Loading default file...")
-          $ ffor
-            (attach (current height) defaultFileInfoEv)
-            $ \(initialHeight, (filePath, canRead)) -> col $ case canRead of
+          $ ffor defaultFileInfoEv
+            $ \(filePath, canRead) -> col $ case canRead of
               False -> text $ constant $ "Can't raad file: "
                 <> T.pack (show filePath)
-              True -> fileView filePath initialHeight
+              True -> fileView filePath
       grout (fixed $ constDyn 1) $ text "Press any key to continue..."
     pure $ void quitEv
 
@@ -65,11 +63,13 @@ fileView ::
   , HasFocusReader t m
   , MonadHold t m
   , MonadFix m
-  ) => OsPath -> Int -> m ()
-fileView filePath initialHeight = do
+  ) => OsPath -> m ()
+fileView filePath = do
   pb <- getPostBuild
-  readFileLines <- performEventAsync $ pb $> liftIO . void . forkIO
-    . (>>=) (withFile filePath ReadMode (`hGetNLines` initialHeight))
+  height <- displayHeight
+  readFileLines <- performEventAsync $ flip fmap (current height `tag` pb)
+    $ \initialHeight -> liftIO . void . forkIO
+      . (>>=) (withFile filePath ReadMode (`hGetNLines` initialHeight))
   void $ networkHold
     (text $ constant $ "file: " <> T.pack (show filePath))
     $ ffor readFileLines $ \fileLines ->
