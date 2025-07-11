@@ -98,8 +98,9 @@ fileView filePath = do
     -- Maybe use some kind of debounceing
     gotFileView <- performEventAsync
       $ ffor (attach (current fileView) needNLinesEv)
-        $ \(MkFileView _ b _, getNMoreLines) onComplete -> liftIO $ void $
-          forkIO $ getLinesFromPos b getNMoreLines >>= onComplete
+        $ \(fv, getNMoreLines) onComplete -> liftIO $ void $
+          forkIO $ getLinesFromPos (fvBottomPos fv) getNMoreLines
+            >>= onComplete
 
     fileView <- accum
       (\curr new -> new { fvLines = fvLines curr <> fvLines new })
