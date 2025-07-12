@@ -20,7 +20,13 @@ import System.Directory.OsPath
   , getPermissions
   )
 import System.File.OsPath (withFile)
-import System.IO (IOMode (ReadMode), SeekMode (AbsoluteSeek), hSeek, hTell)
+import System.IO
+  ( IOMode (ReadMode)
+  , SeekMode (AbsoluteSeek)
+  , hIsEOF
+  , hSeek
+  , hTell
+  )
 
 import Control.Monad.Fix (MonadFix)
 import System.OsPath (OsPath)
@@ -74,7 +80,7 @@ fileView filePath = do
     let
       needNLinesEv = attachWithMaybe
         calLinesToGet
-        (current $ Seq.length . fvLines <$> fileView)
+        (current fileView)
         $ leftmost [ updated height, current height `tag` pb]
 
     -- TODO: This can be running while a new needNLinesEv comes through...
@@ -92,7 +98,7 @@ fileView filePath = do
     -- Maybe use some kind of debounceing
     gotFileView <- performEventAsync
       $ ffor (attach (current fileView) needNLinesEv)
-        $ \(MkFileView _ b, getNMoreLines) onComplete -> liftIO $ void $
+        $ \(MkFileView _ b _, getNMoreLines) onComplete -> liftIO $ void $
           forkIO $ getLinesFromPos b getNMoreLines >>= onComplete
 
     fileView <- accum
@@ -100,6 +106,7 @@ fileView filePath = do
       MkFileView
         { fvLines = mempty
         , fvBottomPos = 0
+        , fvBottomOfFile = Nothing
         }
       gotFileView
   fmap snd $ grout flex $ scrollable def $ col $ do
@@ -115,19 +122,25 @@ fileView filePath = do
       hSeek fh AbsoluteSeek pos
       newLines <- hGetNLines fh numToGet
       nB <- hTell fh
+      eof <- hIsEOF fh
       pure MkFileView
         { fvLines = newLines
         , fvBottomPos = nB
+        , fvBottomOfFile = if eof then Just nB else Nothing
         }
 
-    calLinesToGet numOfLines heightOfScreen = if delta > 0
-      then Just delta
-      else Nothing
+    calLinesToGet fv heightOfScreen
+      | Just fileBottom <- fvBottomOfFile fv
+      , fileBottom <= fvBottomPos fv
+      = Nothing
+      | delta <= 0 = Nothing
+      | otherwise = Just delta
       where
-        delta = heightOfScreen - numOfLines
+        delta = heightOfScreen - Seq.length (fvLines fv)
 
 data FileView
   = MkFileView
   { fvLines :: Seq.Seq T.Text
   , fvBottomPos :: Integer
+  , fvBottomOfFile :: Maybe Integer
   }
