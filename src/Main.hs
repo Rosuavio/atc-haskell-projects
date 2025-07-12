@@ -74,7 +74,7 @@ fileView filePath = do
     let
       needNLinesEv = attachWithMaybe
         calLinesToGet
-        (current $ Seq.length <$> loadedLines)
+        (current $ Seq.length . fvLines <$> fileView)
         $ leftmost [ updated height, current height `tag` pb]
 
     -- TODO: This can be running while a new needNLinesEv comes through...
@@ -90,17 +90,20 @@ fileView filePath = do
     -- a the lines requested should be more.
     --
     -- Maybe use some kind of debounceing
-    gotLinesInfo <- performEventAsync
-      $ ffor (attach (current bottomPos) needNLinesEv)
-        $ \(b, getNMoreLines) onComplete -> liftIO $ void $ forkIO $
-          getLinesFromPos b getNMoreLines >>= onComplete
+    gotFileView <- performEventAsync
+      $ ffor (attach (current fileView) needNLinesEv)
+        $ \(MkFileView _ b, getNMoreLines) onComplete -> liftIO $ void $
+          forkIO $ getLinesFromPos b getNMoreLines >>= onComplete
 
-    (bottomPos, loadedLines) <- splitDynPure <$> accum
-      (\(_, cLines) (nBottom, nLines) -> (nBottom, cLines <> nLines))
-      (0, mempty)
-      gotLinesInfo
+    fileView <- accum
+      (\curr new -> new { fvLines = fvLines curr <> fvLines new })
+      MkFileView
+        { fvLines = mempty
+        , fvBottomPos = 0
+        }
+      gotFileView
   fmap snd $ grout flex $ scrollable def $ col $ do
-    void $ networkView $ ffor loadedLines $ \fileLines ->
+    void $ networkView $ ffor (fvLines <$> fileView) $ \fileLines ->
       for_ fileLines $ \line ->
         grout (fixed $ constDyn 1) $ text $ constant line
 
@@ -112,10 +115,19 @@ fileView filePath = do
       hSeek fh AbsoluteSeek pos
       newLines <- hGetNLines fh numToGet
       nB <- hTell fh
-      pure (nB, newLines)
+      pure MkFileView
+        { fvLines = newLines
+        , fvBottomPos = nB
+        }
 
     calLinesToGet numOfLines heightOfScreen = if delta > 0
       then Just delta
       else Nothing
       where
         delta = heightOfScreen - numOfLines
+
+data FileView
+  = MkFileView
+  { fvLines :: Seq.Seq T.Text
+  , fvBottomPos :: Integer
+  }
