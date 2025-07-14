@@ -8,6 +8,7 @@ pkgs.mkShell {
   ];
   nativeBuildInputs = [
     pkgs.haskellPackages.haskell-language-server
+    pkgs.ghciwatch
   ];
 
   shellHook = ''
