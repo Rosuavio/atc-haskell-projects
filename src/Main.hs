@@ -8,7 +8,7 @@ import System.Directory.OsPath
   )
 import System.OsPath (decodeFS)
 
-import Data.ByteString as BS
+import qualified Data.ByteString as BS
 
 import Util
 
