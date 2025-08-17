@@ -8,7 +8,7 @@ import System.Directory.OsPath
   )
 import System.OsPath (decodeFS)
 
-import qualified Data.ByteString as BS
+import qualified Data.Text.IO as T
 
 import Util
 
@@ -19,4 +19,4 @@ main = do
     False -> pure False
     True -> readable <$> getPermissions todoFilePath
   when canRead $
-    BS.putStr =<< BS.readFile =<< decodeFS todoFilePath
+    T.putStr =<< T.readFile =<< decodeFS todoFilePath
