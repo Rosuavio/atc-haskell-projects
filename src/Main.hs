@@ -30,15 +30,15 @@ main = do
       fileName <- performEventAsync
         (forkWithCallback (T.pack <$> decodeUtf path) <$ pb)
         >>= hold placeHolderFileName
-      gotFileLines <- performEventAsync
-        (forkWithCallback (getLinesIfReadable path) <$ pb)
+      gotTasks <- performEventAsync
+        (forkWithCallback (tryGetTasks path) <$ pb)
 
-      fmap switchDyn $ networkHold (loadingView fileName) $ ffor gotFileLines
-        $ maybe (quitablePrompt $ "Could not read " <> fileName <> ".")
+      fmap switchDyn $ networkHold (loadingView fileName) $ ffor gotTasks
+        $ maybe (quitablePrompt $ "Could not read tasks in " <> fileName <> ".")
         tasksView
   where
-    getLinesIfReadable path = isFileReadable path
-      >>= bool (pure Nothing) (Just <$> getLines path)
+    tryGetTasks path = isFileReadable path
+      >>= bool (pure Nothing) (getTasks path)
     placeHolderFileName = "default TODO file"
     loadingView filename = quitablePrompt $ "Loading " <> filename <> "..."
     quitablePrompt msg = grout flex $ col $ do

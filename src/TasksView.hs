@@ -18,13 +18,13 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Semigroup (Semigroup (sconcat))
 import Data.Sequence (Seq ((:<|), (:|>)))
 import Data.Sequence.NonEmpty (NESeq ((:<||), (:||>)))
+import Task (Task (MkTask))
 
 import qualified Data.Dependent.Map as DMap
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NEL
 import qualified Data.Sequence as Seq
 import qualified Data.Sequence.NonEmpty as NES
-import qualified Data.Text as T
 import qualified Graphics.Vty as Vty
 
 import Reflex
@@ -35,15 +35,15 @@ import TrackingView
 import Util
 
 data Tasks t = Tasks
- { above :: Dynamic t (Seq T.Text)
- , selected :: Dynamic t T.Text
- , below :: Dynamic t (Seq T.Text)
+ { above :: Dynamic t (Seq Task)
+ , selected :: Dynamic t Task
+ , below :: Dynamic t (Seq Task)
  }
 
 data Change a where
-  UpdateTop :: Change (Seq T.Text -> Seq T.Text)
-  UpdateSelected :: Change (T.Text -> T.Text)
-  UpdateBottom :: Change (Seq T.Text -> Seq T.Text)
+  UpdateTop :: Change (Seq Task -> Seq Task)
+  UpdateSelected :: Change (Task -> Task)
+  UpdateBottom :: Change (Seq Task -> Seq Task)
   Quit :: Change ()
 
 deriveGEq ''Change
@@ -64,7 +64,7 @@ tasksView ::
   , HasFocusReader t m
   , HasTheme t m
   )
-  => [T.Text] -> m (Event t ())
+  => [Task] -> m (Event t ())
 tasksView fileLines = do
   rec
     tasks <- constDyn <$> case L.uncons fileLines of
@@ -103,11 +103,11 @@ tasksView fileLines = do
       Just ts -> do
         rec
           tt <- grout flex $ col $ trackingView tt $ do
-            void $ networkView $ traverse_ (line . constant) <$> above ts
+            void $ networkView $ traverse_ (line . constant . displayTask) <$> above ts
             trackingTarget <- grout (fixed 1) $ do
-              richText selectedConf $ current $ selected ts
+              richText selectedConf $ current $ displayTask <$> selected ts
               askRegion
-            void $ networkView $ traverse_ (line . constant) <$> below ts
+            void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
             pure trackingTarget
         pure ()
     line $ current $ join $ ffor tasks $ maybe (pure "q - quit") $ \ts ->
@@ -119,6 +119,8 @@ tasksView fileLines = do
           []
   pure $ select changeEv Quit
   where
+    displayTask (MkTask True  d) = "[x] " <> d
+    displayTask (MkTask False d) = "[ ] " <> d
     selectedConf = RichTextConfig
       $ constant $ Vty.currentAttr `Vty.withStyle` Vty.underline
     messageConf = RichTextConfig $ constant

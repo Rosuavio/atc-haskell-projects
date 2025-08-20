@@ -17,12 +17,14 @@ executable todo-manager
     -Wall
     -threaded
   other-modules:
+    Task
     TasksView
     TrackingView
     Util
   build-depends:
     base >=4.7 && <5,
     containers,
+    cmark-gfm,
     dependent-map,
     dependent-sum,
     dependent-sum-template,

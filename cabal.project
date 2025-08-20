@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+  type:     git
+  location: https://github.com/kivikakk/cmark-gfm-hs.git
+  tag:      4d69545d8730b1fa46b951a6dda345d94215de01
