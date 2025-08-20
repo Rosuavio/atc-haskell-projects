@@ -45,7 +45,7 @@ main = do
     placeHolderFileName = "default TODO file"
     loadingView filename = quitablePrompt $ "Loading " <> filename <> "..."
     quitablePrompt msg = grout flex $ col $ do
-      grout (fixed 1) $ text msg
+      line msg
       grout flex blank
-      grout (fixed 1) $ text "Press Ctrl+c to quit."
+      line "Press Ctrl+c to quit."
       void <$> keyCombo (Vty.KChar 'c', [Vty.MCtrl])
