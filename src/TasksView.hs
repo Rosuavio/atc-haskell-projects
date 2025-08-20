@@ -31,6 +31,7 @@ import Reflex
 import Reflex.Network
 import Reflex.Vty
 
+import TrackingView
 import Util
 
 data Tasks t = Tasks
@@ -99,10 +100,16 @@ tasksView fileLines = do
       Nothing -> do
         grout (fixed 1) $ richText messageConf "File is empty"
         grout flex blank
-      Just ts -> grout flex $ col $ do
-        void $ networkView $ traverse_ (line . constant) <$> above ts
-        grout (fixed 1) $ richText selectedConf $ current $ selected ts
-        void $ networkView $ traverse_ (line . constant) <$> below ts
+      Just ts -> do
+        rec
+          tt <- grout flex $ col $ trackingView tt $ do
+            void $ networkView $ traverse_ (line . constant) <$> above ts
+            trackingTarget <- grout (fixed 1) $ do
+              richText selectedConf $ current $ selected ts
+              askRegion
+            void $ networkView $ traverse_ (line . constant) <$> below ts
+            pure trackingTarget
+        pure ()
     line $ current $ join $ ffor tasks $ maybe (pure "q - quit") $ \ts ->
       ffor2 (above ts) (below ts) $ \abv blw ->
         sconcat $ NEL.intersperse " | "
