@@ -1,7 +1,7 @@
 module Util
   ( forkWithCallback
   , getDefaultFile
-  , hGetLines
+  , getLines
   , isFileReadable
   ) where
 
@@ -34,5 +34,5 @@ isFileReadable :: OsPath -> IO Bool
 isFileReadable path = doesFileExist path
   >>= bool (pure False) (readable <$> getPermissions path)
 
-hGetLines :: OsPath -> IO [Text]
-hGetLines path = withFile path ReadMode (fmap T.lines . T.hGetContents)
+getLines :: OsPath -> IO [Text]
+getLines path = withFile path ReadMode (fmap T.lines . T.hGetContents)

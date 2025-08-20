@@ -37,7 +37,7 @@ main = do
         False -> quitablePrompt $ "Could not read " <> fileName <> "."
         True -> do
           gotFileLines <- getPostBuild
-            >>= performEventAsync . ((forkWithCallback $ hGetLines path) <$)
+            >>= performEventAsync . ((forkWithCallback $ getLines path) <$)
 
           fmap switchDyn $ networkHold (loadingView fileName)
             $ ffor gotFileLines $ \f -> grout flex $ col $ do
