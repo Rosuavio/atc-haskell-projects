@@ -2,6 +2,7 @@ module Main
   ( main
   ) where
 
+import Data.Bool (bool)
 import Data.Foldable (traverse_)
 import Data.Functor (void)
 import Graphics.Vty.CrossPlatform (mkVty)
@@ -29,22 +30,18 @@ main = do
       fileName <- performEventAsync
         (forkWithCallback (T.pack <$> decodeUtf path) <$ pb)
         >>= hold placeHolderFileName
-      gotCanReadFile <- performEventAsync
-        $ forkWithCallback (isFileReadable path) <$ pb
+      gotFileLines <- performEventAsync
+        (forkWithCallback (getLinesIfReadable path) <$ pb)
 
-      fmap switchDyn $ networkHold (loadingView fileName)
-        $ ffor gotCanReadFile $ \case
-        False -> quitablePrompt $ "Could not read " <> fileName <> "."
-        True -> do
-          gotFileLines <- getPostBuild
-            >>= performEventAsync . ((forkWithCallback $ getLines path) <$)
-
-          fmap switchDyn $ networkHold (loadingView fileName)
-            $ ffor gotFileLines $ \f -> grout flex $ col $ do
-            grout flex $ col $ traverse_ (grout (fixed 1) . text . constant) f
-            grout (fixed 1) $ text "Press any key to quit."
-            void <$> input
+      fmap switchDyn $ networkHold (loadingView fileName) $ ffor gotFileLines
+        $ maybe (quitablePrompt $ "Could not read " <> fileName <> ".")
+        $ \f -> grout flex $ col $ do
+        grout flex $ col $ traverse_ (grout (fixed 1) . text . constant) f
+        grout (fixed 1) $ text "Press any key to quit."
+        void <$> input
   where
+    getLinesIfReadable path = isFileReadable path
+      >>= bool (pure Nothing) (Just <$> getLines path)
     placeHolderFileName = "default TODO file"
     loadingView filename = quitablePrompt $ "Loading " <> filename <> "..."
     quitablePrompt msg = grout flex $ col $ do
