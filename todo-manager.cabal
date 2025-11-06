@@ -17,12 +17,18 @@ executable todo-manager
     -Wall
     -threaded
   other-modules:
+    TasksView
     Util
   build-depends:
     base >=4.7 && <5,
+    containers,
+    dependent-map,
+    dependent-sum,
+    dependent-sum-template,
     directory,
     filepath >= 1.5.2,
     file-io,
+    nonempty-containers,
     reflex,
     reflex-vty,
     text,

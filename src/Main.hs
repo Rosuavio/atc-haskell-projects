@@ -3,7 +3,6 @@ module Main
   ) where
 
 import Data.Bool (bool)
-import Data.Foldable (traverse_)
 import Data.Functor (void)
 import Graphics.Vty.CrossPlatform (mkVty)
 import System.OsPath (decodeUtf)
@@ -15,6 +14,7 @@ import Reflex
 import Reflex.Network
 import Reflex.Vty
 
+import TasksView
 import Util
 
 main :: IO ()
@@ -35,10 +35,7 @@ main = do
 
       fmap switchDyn $ networkHold (loadingView fileName) $ ffor gotFileLines
         $ maybe (quitablePrompt $ "Could not read " <> fileName <> ".")
-        $ \f -> grout flex $ col $ do
-        grout flex $ col $ traverse_ (grout (fixed 1) . text . constant) f
-        grout (fixed 1) $ text "Press any key to quit."
-        void <$> input
+        tasksView
   where
     getLinesIfReadable path = isFileReadable path
       >>= bool (pure Nothing) (Just <$> getLines path)
