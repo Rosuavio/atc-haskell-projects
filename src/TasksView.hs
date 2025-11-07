@@ -168,10 +168,12 @@ tasksView fileLines = do
         _ -> pure Nothing
   grout flex $ col $ do
     void $ networkView $ ffor tasks $ \case
-      Nothing -> void $ networkView $ ffor mode $ \case
-        Normal -> grout (fixed 1) $ richText messageConf "File is empty"
-        Inserting _ -> grout (fixed 1)
-          $ richText selectedConf $ current $ displayTask <$> editTask
+      Nothing -> do
+        void $ networkView $ ffor mode $ \case
+          Normal -> grout (fixed 1) $ richText messageConf "File is empty"
+          Inserting _ -> grout (fixed 1)
+            $ richText selectedConf $ current $ displayTask <$> editTask
+        grout flex blank
       Just ts -> do
         rec
           tackingTarget <- grout flex $ col $ trackingView tackingTarget $ do
@@ -197,7 +199,6 @@ tasksView fileLines = do
             void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
             pure trackingTarget
         pure ()
-    grout flex blank
     line $ current $ join $ ffor mode $ \case
       Normal -> fmap (sconcat . NEL.intersperse " | ")
         $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above" :|))
