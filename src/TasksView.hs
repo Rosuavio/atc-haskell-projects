@@ -11,7 +11,7 @@ import Control.Monad.Fix (MonadFix)
 import Data.Bool (bool)
 import Data.Dependent.Sum ((==>))
 import Data.Foldable (traverse_)
-import Data.Functor (void)
+import Data.Functor (void, (<&>))
 import Data.Functor.Identity (Identity (Identity))
 import Data.GADT.Compare.TH (deriveGCompare, deriveGEq)
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -54,6 +54,7 @@ data Change a where
   UpdateTop :: Change (Seq Task -> Seq Task)
   UpdateSelected :: Change (Task -> Task)
   UpdateBottom :: Change (Seq Task -> Seq Task)
+  ClearLines :: Change ()
   CreateLines :: Change Task
   ChangeMode :: Change Mode
   UpdateEditTask :: Change (Task -> Task)
@@ -86,12 +87,14 @@ tasksView fileLines = do
         <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
         <*> (foldDyn ($) t $ select changeEv UpdateSelected)
         <*> (foldDyn ($) (Seq.fromList ts) $ select changeEv UpdateBottom)
-    tasks <- holdDyn initialTasks
-      $ flip pushAlways (select changeEv CreateLines) $ \newLine -> fmap Just $
-      Tasks
-      <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
-      <*> (foldDyn ($) newLine $ select changeEv UpdateSelected)
-      <*> (foldDyn ($) Seq.Empty $ select changeEv UpdateBottom)
+    tasks <- holdDyn initialTasks $ leftmost
+      [ Nothing <$ select changeEv ClearLines
+      , flip pushAlways (select changeEv CreateLines) $ \newLine -> fmap Just $
+        Tasks
+        <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
+        <*> (foldDyn ($) newLine $ select changeEv UpdateSelected)
+        <*> (foldDyn ($) Seq.Empty $ select changeEv UpdateBottom)
+      ]
     mode <- holdDyn Normal $ select changeEv ChangeMode
     -- TODO: Something feels wired about having this around in all contexts I
     -- tried to put this in the Inserting mode, but it would mean updates to the
@@ -130,6 +133,32 @@ tasksView fileLines = do
             [ ChangeMode ==> Inserting Down
             , UpdateEditTask ==> const (MkTask False "")
             ]
+        (Normal, Vty.EvKey (Vty.KChar 'd') []) -> (>>=) (sample $ current tasks)
+          $ maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ below ts)
+          $ \case
+            (newSel :<| bot) -> pure $ Just $ DMap.fromList
+              [ UpdateSelected ==> const newSel
+              , UpdateBottom ==> const bot
+              ]
+            Seq.Empty -> sample $ current $ above ts <&> Just . \case
+              (top :|> newSel) -> DMap.fromList
+                [ UpdateSelected ==> const newSel
+                , UpdateTop ==> const top
+                ]
+              Seq.Empty -> DMap.singleton ClearLines $ Identity ()
+        (Normal, Vty.EvKey (Vty.KChar 'D') []) -> (>>=) (sample $ current tasks)
+          $ maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
+          $ \case
+            (top :|> newSel) -> pure $ Just $ DMap.fromList
+              [ UpdateSelected ==> const newSel
+              , UpdateTop ==> const top
+              ]
+            Seq.Empty -> sample $ current $ below ts <&> Just . \case
+              (newSel :<| bot) -> DMap.fromList
+                [ UpdateSelected ==> const newSel
+                , UpdateBottom ==> const bot
+                ]
+              Seq.Empty -> DMap.singleton ClearLines $ Identity ()
         (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
           pure $ Just $ DMap.singleton Quit (Identity ())
         (Inserting _, Vty.EvKey (Vty.KEsc) []) ->
@@ -201,7 +230,7 @@ tasksView fileLines = do
         pure ()
     line $ current $ join $ ffor mode $ \case
       Normal -> fmap (sconcat . NEL.intersperse " | ")
-        $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above" :|))
+        $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
         $ join $ ffor tasks $ maybe (pure []) $ \ts ->
           ffor2 (above ts) (below ts) $ \abv blw ->
             bool id ("j - move down" :) (not $ Seq.null blw)
