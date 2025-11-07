@@ -25,7 +25,9 @@ import qualified Data.List as L
 import qualified Data.List.NonEmpty as NEL
 import qualified Data.Sequence as Seq
 import qualified Data.Sequence.NonEmpty as NES
+import qualified Data.Text as T
 import qualified Graphics.Vty as Vty
+import qualified Task as Tsk
 
 import Reflex
 import Reflex.Network
@@ -33,6 +35,10 @@ import Reflex.Vty
 
 import TrackingView
 import Util
+
+data Mode
+  = Normal
+  | Inserting
 
 data Tasks t = Tasks
  { above :: Dynamic t (Seq Task)
@@ -44,6 +50,9 @@ data Change a where
   UpdateTop :: Change (Seq Task -> Seq Task)
   UpdateSelected :: Change (Task -> Task)
   UpdateBottom :: Change (Seq Task -> Seq Task)
+  CreateLines :: Change Task
+  ChangeMode :: Change Mode
+  UpdateEditTask :: Change (Task -> Task)
   Quit :: Change ()
 
 deriveGEq ''Change
@@ -67,56 +76,119 @@ tasksView ::
   => [Task] -> m (Event t ())
 tasksView fileLines = do
   rec
-    tasks <- constDyn <$> case L.uncons fileLines of
+    initialTasks <- case L.uncons fileLines of
       Nothing -> pure Nothing
       Just (t, ts) -> fmap Just $ Tasks
         <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
         <*> (foldDyn ($) t $ select changeEv UpdateSelected)
         <*> (foldDyn ($) (Seq.fromList ts) $ select changeEv UpdateBottom)
-    changeEv <- fmap fan $ ffor input $ push $ \case
-      (Vty.EvKey (Vty.KChar 'k') []) -> (>>=) (sample $ current tasks)
-        . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
-        . NES.withNonEmpty (pure Nothing) $ \(top :||> newSel) -> do
-          oldSel <- sample $ current $ selected ts
+    tasks <- holdDyn initialTasks
+      $ flip pushAlways (select changeEv CreateLines) $ \newLine -> fmap Just $
+      Tasks
+      <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
+      <*> (foldDyn ($) newLine $ select changeEv UpdateSelected)
+      <*> (foldDyn ($) Seq.Empty $ select changeEv UpdateBottom)
+    mode <- holdDyn Normal $ select changeEv ChangeMode
+    -- TODO: Something feels wired about having this around in all contexts I
+    -- tried to put this in the Inserting mode, but it would mean updates to the
+    -- editTask would update the mode and trigger bigger
+    -- rebuilds, it then felt like it made sense to make it a Dynamic in the
+    -- Inserting mode, but then that hkd did not work in ChangeMode
+    editTask <- foldDyn ($) (MkTask False "") $ select changeEv UpdateEditTask
+    changeEv <- fmap fan $ ffor input $ push $ \k -> do
+      m <- sample $ current mode
+      case (m, k) of
+        (Normal, Vty.EvKey (Vty.KChar 'k') []) -> (>>=) (sample $ current tasks)
+          . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
+          . NES.withNonEmpty (pure Nothing) $ \(top :||> newSel) -> do
+            oldSel <- sample $ current $ selected ts
+            pure $ Just $ DMap.fromList
+              [ UpdateTop ==> const top
+              , UpdateSelected ==> const newSel
+              , UpdateBottom ==> (oldSel :<|)
+              ]
+        (Normal, Vty.EvKey (Vty.KChar 'j') []) -> (>>=) (sample $ current tasks)
+          . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ below ts)
+          . NES.withNonEmpty (pure Nothing) $ \(newSel :<|| bot) -> do
+            oldSel <- sample $ current $ selected ts
+            pure $ Just $ DMap.fromList
+              [ UpdateTop ==> (:|> oldSel)
+              , UpdateSelected ==> const newSel
+              , UpdateBottom ==> const bot
+              ]
+        (Normal, Vty.EvKey (Vty.KChar 'I') []) ->
           pure $ Just $ DMap.fromList
-            [ UpdateTop ==> const top
-            , UpdateSelected ==> const newSel
-            , UpdateBottom ==> (oldSel :<|)
+            [ ChangeMode ==> Inserting
+            , UpdateEditTask ==> const (MkTask False "")
             ]
-      (Vty.EvKey (Vty.KChar 'j') []) -> (>>=) (sample $ current tasks)
-        . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ below ts)
-        . NES.withNonEmpty (pure Nothing) $ \(newSel :<|| bot) -> do
-          oldSel <- sample $ current $ selected ts
+        (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
+          pure $ Just $ DMap.singleton Quit (Identity ())
+        (Inserting, Vty.EvKey (Vty.KEsc) []) ->
           pure $ Just $ DMap.fromList
-            [ UpdateTop ==> (:|> oldSel)
-            , UpdateSelected ==> const newSel
-            , UpdateBottom ==> const bot
+            [ ChangeMode ==> Normal
+            , UpdateEditTask ==> const (MkTask False "")
             ]
-      (Vty.EvKey (Vty.KChar 'q') []) ->
-        pure $ Just $ DMap.singleton Quit (Identity ())
-      _ -> pure Nothing
+        (Inserting, Vty.EvKey (Vty.KEnter) []) -> do
+          (sample $ current tasks) >>= \case
+            Nothing -> do
+              newSel <- sample $ current editTask
+              pure $ Just $ DMap.fromList
+                [ ChangeMode ==> Normal
+                , UpdateEditTask ==> const (MkTask False "")
+                , CreateLines ==> newSel
+                ]
+            Just ts -> do
+              oldSel <- sample $ current $ selected ts
+              newSel <- sample $ current editTask
+              pure $ Just $ DMap.fromList
+                [ ChangeMode ==> Normal
+                , UpdateEditTask ==> const (MkTask False "")
+                , UpdateSelected ==> const newSel
+                , UpdateBottom ==> (oldSel :<|)
+                ]
+        (Inserting, Vty.EvKey kk []) -> do
+          pure $ case kk of
+            Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity
+              (\t@(MkTask _ d) -> t{ Tsk.description = T.snoc d c })
+            Vty.KBS -> Just $ DMap.singleton UpdateEditTask $ Identity
+              (\t@(MkTask _ d) ->
+                t{ Tsk.description = maybe "" fst $ T.unsnoc d })
+            _ -> Nothing
+        _ -> pure Nothing
   grout flex $ col $ do
     void $ networkView $ ffor tasks $ \case
-      Nothing -> do
-        grout (fixed 1) $ richText messageConf "File is empty"
-        grout flex blank
+      Nothing -> void $ networkView $ ffor mode $ \case
+        Normal -> grout (fixed 1) $ richText messageConf "File is empty"
+        Inserting -> grout (fixed 1)
+          $ richText selectedConf $ current $ displayTask <$> editTask
       Just ts -> do
         rec
-          tt <- grout flex $ col $ trackingView tt $ do
+          tackingTarget <- grout flex $ col $ trackingView tackingTarget $ do
+            r <- askRegion
             void $ networkView $ traverse_ (line . constant . displayTask) <$> above ts
-            trackingTarget <- grout (fixed 1) $ do
-              richText selectedConf $ current $ displayTask <$> selected ts
-              askRegion
+            trackingTarget <- fmap join $ (=<<) (holdDyn r) $ networkView
+              $ ffor mode $ \case
+              Normal -> grout (fixed 1) $ do
+                richText selectedConf $ current $ displayTask <$> selected ts
+                askRegion
+              Inserting -> do
+                newTaskRegion <- grout (fixed 1) $ do
+                  richText selectedConf $ current $ displayTask <$> editTask
+                  askRegion
+                line $ current $ displayTask <$> selected ts
+                pure newTaskRegion
             void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
             pure trackingTarget
         pure ()
-    line $ current $ join $ ffor tasks $ maybe (pure "q - quit") $ \ts ->
-      ffor2 (above ts) (below ts) $ \abv blw ->
-        sconcat $ NEL.intersperse " | "
-          $ ("q - quit" :|)
+    grout flex blank
+    line $ current $ join $ ffor mode $ \case
+      Normal -> fmap (sconcat . NEL.intersperse " | ")
+        $ (<*>) (pure ("Mode: Normal | q - quit | I - start insert" :|)) $ join $ ffor tasks
+        $ maybe (pure []) $ \ts -> ffor2 (above ts) (below ts) $ \abv blw ->
+          bool id ("j - move down" :) (not $ Seq.null blw)
           $ bool id ("k - move up" :) (not $ Seq.null abv)
-          $ bool id ("j - move down" :) (not $ Seq.null blw)
           []
+      Inserting -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
   pure $ select changeEv Quit
   where
     displayTask (MkTask True  d) = "[x] " <> d
