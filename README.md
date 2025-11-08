@@ -41,7 +41,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 - [x] Users can mark a task as completed.
 - [x] Users can delete a task from the list.
 - [x] Users can edit a task’s description.
-- [x] Tasks should be stored persistently (e.g., in a text file).
+- [ ] Tasks should be stored persistently (e.g., in a text file).
 
 ### Advanced Features (Optional):
 - [ ] Allow users to prioritize tasks (e.g., High, Medium, Low).
