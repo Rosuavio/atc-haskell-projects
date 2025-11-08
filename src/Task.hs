@@ -5,6 +5,8 @@ module Task
 
 import Data.Text (Text)
 
+import qualified Data.Text as T
+
 import CMarkGFM
 
 data Task = MkTask
@@ -21,6 +23,6 @@ parseDoc t = case commonmarkToNode [] [extTaskList] t of
 fromTaskListItem :: Node -> Maybe Task
 fromTaskListItem (Node _ (TASKLIST p) c) = Just $ MkTask
   { completed = p
-  , description = nodeToCommonmark [] Nothing $ Node Nothing DOCUMENT c
+  , description = T.dropEnd 1 $ nodeToCommonmark [] Nothing $ Node Nothing DOCUMENT c
   }
 fromTaskListItem _ = Nothing
