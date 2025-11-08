@@ -43,6 +43,7 @@ data Direction
 data Mode
   = Normal
   | Inserting Direction
+  | Editing
 
 data Tasks t = Tasks
  { above :: Dynamic t (Seq Task)
@@ -159,6 +160,13 @@ tasksView fileLines = do
                 , UpdateBottom ==> const bot
                 ]
               Seq.Empty -> DMap.singleton ClearLines $ Identity ()
+        (Normal, Vty.EvKey (Vty.KChar 'e') []) -> (>>=) (sample $ current tasks)
+          $ maybe (pure Nothing) $ \ts -> do
+            sel <- (sample $ current $ selected ts)
+            pure $ Just $ DMap.fromList
+              [ ChangeMode ==> Editing
+              , UpdateEditTask ==> const sel
+              ]
         (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
           pure $ Just $ DMap.singleton Quit (Identity ())
         (Inserting _, Vty.EvKey (Vty.KEsc) []) ->
@@ -195,6 +203,27 @@ tasksView fileLines = do
               (\t@(MkTask _ d) ->
                 t{ Tsk.description = maybe "" fst $ T.unsnoc d })
             _ -> Nothing
+        (Editing, Vty.EvKey (Vty.KEsc) []) ->
+          pure $ Just $ DMap.fromList
+            [ ChangeMode ==> Normal
+            , UpdateEditTask ==> const (MkTask False "")
+            ]
+        -- BUG: Shift+Enter Seems to cancel (like Esc)
+        (Editing, Vty.EvKey (Vty.KEnter) []) -> do
+          newSel <- sample $ current editTask
+          pure $ Just $ DMap.fromList
+            [ ChangeMode ==> Normal
+            , UpdateEditTask ==> const (MkTask False "")
+            , UpdateSelected ==> const newSel
+            ]
+        (Editing, Vty.EvKey kk []) -> do
+          pure $ case kk of
+            Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity
+              (\t@(MkTask _ d) -> t{ Tsk.description = T.snoc d c })
+            Vty.KBS -> Just $ DMap.singleton UpdateEditTask $ Identity
+              (\t@(MkTask _ d) ->
+                t{ Tsk.description = maybe "" fst $ T.unsnoc d })
+            _ -> Nothing
         _ -> pure Nothing
   grout flex $ col $ do
     void $ networkView $ ffor tasks $ \case
@@ -202,6 +231,8 @@ tasksView fileLines = do
         void $ networkView $ ffor mode $ \case
           Normal -> grout (fixed 1) $ richText messageConf "File is empty"
           Inserting _ -> grout (fixed 1)
+            $ richText selectedConf $ current $ displayTask <$> editTask
+          Editing -> grout (fixed 1)
             $ richText selectedConf $ current $ displayTask <$> editTask
         grout flex blank
       Just ts -> do
@@ -226,6 +257,9 @@ tasksView fileLines = do
                   richText selectedConf $ current $ displayTask <$> editTask
                   askRegion
                 pure newTaskRegion
+              Editing -> grout (fixed 1) $ do
+                richText selectedConf $ current $ displayTask <$> editTask
+                askRegion
             void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
             pure trackingTarget
         pure ()
@@ -238,6 +272,7 @@ tasksView fileLines = do
             $ bool id ("k - move up" :) (not $ Seq.null abv)
             []
       Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
+      Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
   pure $ select changeEv Quit
   where
     displayTask (MkTask True  d) = "[x] " <> d

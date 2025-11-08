@@ -15,6 +15,7 @@ executable todo-manager
     OverloadedStrings
   ghc-options:
     -Wall
+    -Werror=incomplete-patterns
     -threaded
   other-modules:
     Task

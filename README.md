@@ -40,7 +40,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 - [x] Users can view all tasks in the to-do list.
 - [ ] Users can mark a task as completed.
 - [x] Users can delete a task from the list.
-- [ ] Users can edit a task’s description.
+- [x] Users can edit a task’s description.
 - [x] Tasks should be stored persistently (e.g., in a text file).
 
 ### Advanced Features (Optional):
