@@ -147,6 +147,9 @@ tasksView fileLines = do
                 , UpdateTop ==> const top
                 ]
               Seq.Empty -> DMap.singleton ClearLines $ Identity ()
+        (Normal, Vty.EvKey (Vty.KChar ' ') []) -> pure $ Just
+          $ DMap.singleton UpdateSelected
+          $ Identity $ (\t@(MkTask c _) -> t{ Tsk.completed = not c })
         (Normal, Vty.EvKey (Vty.KChar 'D') []) -> (>>=) (sample $ current tasks)
           $ maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
           $ \case
@@ -267,8 +270,12 @@ tasksView fileLines = do
       Normal -> fmap (sconcat . NEL.intersperse " | ")
         $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
         $ join $ ffor tasks $ maybe (pure []) $ \ts ->
-          ffor2 (above ts) (below ts) $ \abv blw ->
-            bool id ("j - move down" :) (not $ Seq.null blw)
+          ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
+            ("space - mark " <> case Tsk.completed sel of
+              True -> "incomplete"
+              False -> "complete"
+            :)
+            $ bool id ("j - move down" :) (not $ Seq.null blw)
             $ bool id ("k - move up" :) (not $ Seq.null abv)
             []
       Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
