@@ -36,9 +36,13 @@ import Reflex.Vty
 import TrackingView
 import Util
 
+data Direction
+  = Up
+  | Down
+
 data Mode
   = Normal
-  | Inserting
+  | Inserting Direction
 
 data Tasks t = Tasks
  { above :: Dynamic t (Seq Task)
@@ -118,17 +122,22 @@ tasksView fileLines = do
               ]
         (Normal, Vty.EvKey (Vty.KChar 'I') []) ->
           pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Inserting
+            [ ChangeMode ==> Inserting Up
+            , UpdateEditTask ==> const (MkTask False "")
+            ]
+        (Normal, Vty.EvKey (Vty.KChar 'i') []) ->
+          pure $ Just $ DMap.fromList
+            [ ChangeMode ==> Inserting Down
             , UpdateEditTask ==> const (MkTask False "")
             ]
         (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
           pure $ Just $ DMap.singleton Quit (Identity ())
-        (Inserting, Vty.EvKey (Vty.KEsc) []) ->
+        (Inserting _, Vty.EvKey (Vty.KEsc) []) ->
           pure $ Just $ DMap.fromList
             [ ChangeMode ==> Normal
             , UpdateEditTask ==> const (MkTask False "")
             ]
-        (Inserting, Vty.EvKey (Vty.KEnter) []) -> do
+        (Inserting d, Vty.EvKey (Vty.KEnter) []) -> do
           (sample $ current tasks) >>= \case
             Nothing -> do
               newSel <- sample $ current editTask
@@ -144,9 +153,11 @@ tasksView fileLines = do
                 [ ChangeMode ==> Normal
                 , UpdateEditTask ==> const (MkTask False "")
                 , UpdateSelected ==> const newSel
-                , UpdateBottom ==> (oldSel :<|)
+                , case d of
+                    Up -> UpdateBottom ==> (oldSel :<|)
+                    Down -> UpdateTop ==> (:|> oldSel)
                 ]
-        (Inserting, Vty.EvKey kk []) -> do
+        (Inserting _, Vty.EvKey kk []) -> do
           pure $ case kk of
             Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity
               (\t@(MkTask _ d) -> t{ Tsk.description = T.snoc d c })
@@ -159,7 +170,7 @@ tasksView fileLines = do
     void $ networkView $ ffor tasks $ \case
       Nothing -> void $ networkView $ ffor mode $ \case
         Normal -> grout (fixed 1) $ richText messageConf "File is empty"
-        Inserting -> grout (fixed 1)
+        Inserting _ -> grout (fixed 1)
           $ richText selectedConf $ current $ displayTask <$> editTask
       Just ts -> do
         rec
@@ -171,11 +182,17 @@ tasksView fileLines = do
               Normal -> grout (fixed 1) $ do
                 richText selectedConf $ current $ displayTask <$> selected ts
                 askRegion
-              Inserting -> do
+              Inserting Up -> do
                 newTaskRegion <- grout (fixed 1) $ do
                   richText selectedConf $ current $ displayTask <$> editTask
                   askRegion
                 line $ current $ displayTask <$> selected ts
+                pure newTaskRegion
+              Inserting Down -> do
+                line $ current $ displayTask <$> selected ts
+                newTaskRegion <- grout (fixed 1) $ do
+                  richText selectedConf $ current $ displayTask <$> editTask
+                  askRegion
                 pure newTaskRegion
             void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
             pure trackingTarget
@@ -183,12 +200,13 @@ tasksView fileLines = do
     grout flex blank
     line $ current $ join $ ffor mode $ \case
       Normal -> fmap (sconcat . NEL.intersperse " | ")
-        $ (<*>) (pure ("Mode: Normal | q - quit | I - start insert" :|)) $ join $ ffor tasks
-        $ maybe (pure []) $ \ts -> ffor2 (above ts) (below ts) $ \abv blw ->
-          bool id ("j - move down" :) (not $ Seq.null blw)
-          $ bool id ("k - move up" :) (not $ Seq.null abv)
-          []
-      Inserting -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
+        $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above" :|))
+        $ join $ ffor tasks $ maybe (pure []) $ \ts ->
+          ffor2 (above ts) (below ts) $ \abv blw ->
+            bool id ("j - move down" :) (not $ Seq.null blw)
+            $ bool id ("k - move up" :) (not $ Seq.null abv)
+            []
+      Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
   pure $ select changeEv Quit
   where
     displayTask (MkTask True  d) = "[x] " <> d
