@@ -166,6 +166,7 @@ tasksView fileLines = do
             [ ChangeMode ==> Normal
             , UpdateEditTask ==> const (MkTask False "")
             ]
+        -- BUG: Shift+Enter Seems to cancel (like Esc)
         (Inserting d, Vty.EvKey (Vty.KEnter) []) -> do
           (sample $ current tasks) >>= \case
             Nothing -> do
