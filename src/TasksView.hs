@@ -1,6 +1,7 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TasksView
   ( tasksView
@@ -8,6 +9,7 @@ module TasksView
 
 import Control.Monad (join)
 import Control.Monad.Fix (MonadFix)
+import Control.Monad.IO.Class (MonadIO)
 import Data.Bool (bool)
 import Data.Dependent.Sum ((==>))
 import Data.Foldable (traverse_)
@@ -18,6 +20,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Semigroup (Semigroup (sconcat))
 import Data.Sequence (Seq ((:<|), (:|>)))
 import Data.Sequence.NonEmpty (NESeq ((:<||), (:||>)))
+import System.OsPath (OsPath, decodeUtf)
 import Task (Task (MkTask))
 
 import qualified Data.Dependent.Map as DMap
@@ -34,6 +37,7 @@ import Reflex.Network
 import Reflex.Vty
 
 import TrackingView
+import Ui
 import Util
 
 data Direction
@@ -78,33 +82,43 @@ tasksView ::
   , HasDisplayRegion t m
   , HasFocusReader t m
   , HasTheme t m
+  , TriggerEvent t m
+  , PerformEvent t m
+  , MonadIO (Performable m)
   )
-  => [Task] -> m (Event t ())
-tasksView fileLines = do
-  rec
-    tasks <- holdMaybeTasks fileLines
-      (select changeEv UpdateTop)
-      (select changeEv UpdateSelected)
-      (select changeEv UpdateBottom)
-      (select changeEv CreateLines)
-      (select changeEv ClearLines)
-    mode <- holdDyn Normal $ select changeEv ChangeMode
-    -- TODO: Something feels wired about having this around in all contexts I
-    -- tried to put this in the Inserting mode, but it would mean updates to the
-    -- editTask would update the mode and trigger bigger
-    -- rebuilds, it then felt like it made sense to make it a Dynamic in the
-    -- Inserting mode, but then that hkd did not work in ChangeMode
-    editTask <- foldDyn ($) Tsk.def $ select changeEv UpdateEditTask
-    changeEv <- fmap fan $ ffor input $ push $ \i ->
-      (sample $ current mode) >>= \case
-        Normal -> handleNormal i tasks
-        Inserting d -> handleInserting i d tasks editTask
-        Editing -> handleEditing i editTask
-  grout flex $ col $ do
-    void $ networkView $ ffor tasks
-      $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
-    line $ current $ menuView mode tasks
-  pure $ select changeEv Quit
+  => OsPath -> m (Event t ())
+tasksView path = do
+  pb <- getPostBuild
+  fileName <- performEventAsync
+    (forkWithCallback (T.pack <$> decodeUtf path) <$ pb)
+    >>= hold ""
+  getTasksRezEv <- performEventAsync (forkWithCallback (getTasks path) <$ pb)
+  fmap switchDyn $ networkHold (loadingView fileName) $ ffor getTasksRezEv
+    $ \getTasksRez -> do
+    rec
+      tasks <- holdMaybeTasks (fromRight [] getTasksRez)
+        (select changeEv UpdateTop)
+        (select changeEv UpdateSelected)
+        (select changeEv UpdateBottom)
+        (select changeEv CreateLines)
+        (select changeEv ClearLines)
+      mode <- holdDyn Normal $ select changeEv ChangeMode
+      -- TODO: Something feels wired about having this around in all contexts I
+      -- tried to put this in the Inserting mode, but it would mean updates to the
+      -- editTask would update the mode and trigger bigger
+      -- rebuilds, it then felt like it made sense to make it a Dynamic in the
+      -- Inserting mode, but then that hkd did not work in ChangeMode
+      editTask <- foldDyn ($) Tsk.def $ select changeEv UpdateEditTask
+      changeEv <- fmap fan $ ffor input $ push $ \i ->
+        (sample $ current mode) >>= \case
+          Normal -> handleNormal i tasks
+          Inserting d -> handleInserting i d tasks editTask
+          Editing -> handleEditing i editTask
+    grout flex $ col $ do
+      void $ networkView $ ffor tasks
+        $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
+      line $ current $ menuView mode tasks
+    pure $ select changeEv Quit
 
 holdMaybeTasks ::
   ( Reflex t
@@ -217,7 +231,7 @@ emptyView ::
   -> m ()
 emptyView mode editTask = do
   void $ grout (fixed 1) $ networkView $ ffor mode $ \case
-    Normal -> richText messageConf "File is empty"
+    Normal -> richText messageConf "No tasks"
     Inserting _ -> selectedTaskView $ editTask
     -- Should not be possible
     Editing -> selectedTaskView $ editTask
