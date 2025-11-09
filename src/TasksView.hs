@@ -103,99 +103,11 @@ tasksView fileLines = do
     -- rebuilds, it then felt like it made sense to make it a Dynamic in the
     -- Inserting mode, but then that hkd did not work in ChangeMode
     editTask <- foldDyn ($) Tsk.def $ select changeEv UpdateEditTask
-    let
-      withTasks d f = sample (current tasks) >>= maybe d f
-    changeEv <- fmap fan $ ffor input $ push $ \k -> do
-      m <- sample $ current mode
-      case (m, k) of
-        (Normal, Vty.EvKey (Vty.KChar 'k') []) -> withTasks (pure Nothing)
-          $ \ts -> (>>=) (sample $ current $ above ts)
-          . NES.withNonEmpty (pure Nothing) $ \(top :||> newSel) -> do
-            oldSel <- sample $ current $ selected ts
-            pure $ Just $ DMap.fromList
-              [ UpdateTop ==> const top
-              , UpdateSelected ==> const newSel
-              , UpdateBottom ==> (oldSel :<|)
-              ]
-        (Normal, Vty.EvKey (Vty.KChar 'j') []) -> withTasks (pure Nothing)
-          $ \ts -> (>>=) (sample $ current $ below ts)
-          . NES.withNonEmpty (pure Nothing) $ \(newSel :<|| bot) -> do
-            oldSel <- sample $ current $ selected ts
-            pure $ Just $ DMap.fromList
-              [ UpdateTop ==> (:|> oldSel)
-              , UpdateSelected ==> const newSel
-              , UpdateBottom ==> const bot
-              ]
-        (Normal, Vty.EvKey (Vty.KChar 'I') []) ->
-          pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Inserting Up
-            , UpdateEditTask ==> const Tsk.def
-            ]
-        (Normal, Vty.EvKey (Vty.KChar 'i') []) ->
-          pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Inserting Down
-            , UpdateEditTask ==> const Tsk.def
-            ]
-        (Normal, Vty.EvKey (Vty.KChar 'd') []) -> withTasks (pure Nothing)
-          $ \ts -> sample (current $ below ts) >>= \case
-            (newSel :<| bot) -> pure $ Just $ DMap.fromList
-              [ UpdateSelected ==> const newSel
-              , UpdateBottom ==> const bot
-              ]
-            Seq.Empty -> sample $ current $ above ts <&> Just . \case
-              (top :|> newSel) -> DMap.fromList
-                [ UpdateSelected ==> const newSel
-                , UpdateTop ==> const top
-                ]
-              Seq.Empty -> DMap.singleton ClearLines $ Identity ()
-        (Normal, Vty.EvKey (Vty.KChar ' ') []) -> pure $ Just
-          $ DMap.singleton UpdateSelected $ Identity $ Tsk.toggleComplete
-        (Normal, Vty.EvKey (Vty.KChar 'D') []) -> withTasks (pure Nothing)
-          $ \ts -> sample (current $ above ts) >>= \case
-            (top :|> newSel) -> pure $ Just $ DMap.fromList
-              [ UpdateSelected ==> const newSel
-              , UpdateTop ==> const top
-              ]
-            Seq.Empty -> sample $ current $ below ts <&> Just . \case
-              (newSel :<| bot) -> DMap.fromList
-                [ UpdateSelected ==> const newSel
-                , UpdateBottom ==> const bot
-                ]
-              Seq.Empty -> DMap.singleton ClearLines $ Identity ()
-        (Normal, Vty.EvKey (Vty.KChar 'e') []) -> withTasks (pure Nothing)
-          $ \ts -> do
-            sel <- (sample $ current $ selected ts)
-            pure $ Just $ DMap.fromList
-              [ ChangeMode ==> Editing
-              , UpdateEditTask ==> const sel
-              ]
-        (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
-          pure $ Just $ DMap.singleton Quit (Identity ())
-        (Inserting _, Vty.EvKey (Vty.KEsc) []) -> pure $ Just $ resetChangSet
-        -- BUG: Shift+Enter Seems to cancel (like Esc)
-        (Inserting d, Vty.EvKey (Vty.KEnter) []) -> do
-          newSel <- sample $ current editTask
-          withTasks
-            (pure $ Just $ DMap.insert CreateLines (Identity newSel)
-              resetChangSet
-            )
-            $ \ts -> do
-              oldSel <- sample $ current $ selected ts
-              pure $ Just $ DMap.union resetChangSet $ DMap.fromList
-                [ UpdateSelected ==> const newSel
-                , case d of
-                    Up -> UpdateBottom ==> (oldSel :<|)
-                    Down -> UpdateTop ==> (:|> oldSel)
-                ]
-        (Inserting _, Vty.EvKey kk []) -> pure $ updateTaskForKey kk
-        (Editing, Vty.EvKey (Vty.KEsc) []) -> pure $ Just $ resetChangSet
-        -- BUG: Shift+Enter Seems to cancel (like Esc)
-        (Editing, Vty.EvKey (Vty.KEnter) []) -> do
-          newSel <- sample $ current editTask
-          pure $ Just $ DMap.insert UpdateSelected (Identity $ const newSel)
-            resetChangSet
-        (Editing, Vty.EvKey kk []) -> pure $ updateTaskForKey kk
-        _ -> pure Nothing
+    changeEv <- fmap fan $ ffor input $ push $ \i ->
+      (sample $ current mode) >>= \case
+        Normal -> handleNormal i tasks
+        Inserting d -> handleInserting i d tasks editTask
+        Editing -> handleEditing i editTask
   grout flex $ col $ do
     void $ networkView $ ffor tasks $ \case
       Nothing -> do
@@ -261,6 +173,126 @@ selectedConf = RichTextConfig $ constant
 messageConf :: Reflex t => RichTextConfig t
 messageConf = RichTextConfig $ constant
   $ Vty.currentAttr `Vty.withStyle` Vty.italic
+
+handleNormal ::
+  ( Reflex t
+  , MonadSample t m
+  )
+  => Vty.Event
+  -> Dynamic t (Maybe (Tasks t))
+  -> m (Maybe (DMap.DMap Change Identity))
+handleNormal (Vty.EvKey (Vty.KChar 'k') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
+  $ \ts -> (>>=) (sample $ current $ above ts) . NES.withNonEmpty (pure Nothing)
+  $ \(top :||> newSel) -> do
+    oldSel <- sample $ current $ selected ts
+    pure $ Just $ DMap.fromList
+      [ UpdateTop ==> const top
+      , UpdateSelected ==> const newSel
+      , UpdateBottom ==> (oldSel :<|)
+      ]
+handleNormal (Vty.EvKey (Vty.KChar 'j') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
+  $ \ts -> (>>=) (sample $ current $ below ts) . NES.withNonEmpty (pure Nothing)
+  $ \(newSel :<|| bot) -> do
+    oldSel <- sample $ current $ selected ts
+    pure $ Just $ DMap.fromList
+      [ UpdateTop ==> (:|> oldSel)
+      , UpdateSelected ==> const newSel
+      , UpdateBottom ==> const bot
+      ]
+handleNormal (Vty.EvKey (Vty.KChar 'I') []) _ = pure $ Just
+  $ DMap.fromList
+  [ ChangeMode ==> Inserting Up
+  , UpdateEditTask ==> const Tsk.def
+  ]
+handleNormal (Vty.EvKey (Vty.KChar 'i') []) _ = pure $ Just
+  $ DMap.fromList
+  [ ChangeMode ==> Inserting Down
+  , UpdateEditTask ==> const Tsk.def
+  ]
+handleNormal (Vty.EvKey (Vty.KChar 'd') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
+  $ \ts -> sample (current $ below ts) >>= \case
+    (newSel :<| bot) -> pure $ Just $ DMap.fromList
+      [ UpdateSelected ==> const newSel
+      , UpdateBottom ==> const bot
+      ]
+    Seq.Empty -> sample $ current $ above ts <&> Just . \case
+      (top :|> newSel) -> DMap.fromList
+        [ UpdateSelected ==> const newSel
+        , UpdateTop ==> const top
+        ]
+      Seq.Empty -> DMap.singleton ClearLines $ Identity ()
+handleNormal (Vty.EvKey (Vty.KChar ' ') []) _  = pure $ Just
+  $ DMap.singleton UpdateSelected $ Identity $ Tsk.toggleComplete
+handleNormal (Vty.EvKey (Vty.KChar 'D') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
+  $ \ts -> sample (current $ above ts) >>= \case
+    (top :|> newSel) -> pure $ Just $ DMap.fromList
+      [ UpdateSelected ==> const newSel
+      , UpdateTop ==> const top
+      ]
+    Seq.Empty -> sample $ current $ below ts <&> Just . \case
+      (newSel :<| bot) -> DMap.fromList
+        [ UpdateSelected ==> const newSel
+        , UpdateBottom ==> const bot
+        ]
+      Seq.Empty -> DMap.singleton ClearLines $ Identity ()
+handleNormal (Vty.EvKey (Vty.KChar 'e') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
+  $ \ts -> do
+    sel <- (sample $ current $ selected ts)
+    pure $ Just $ DMap.fromList
+      [ ChangeMode ==> Editing
+      , UpdateEditTask ==> const sel
+      ]
+handleNormal (Vty.EvKey (Vty.KChar 'q') []) _ = pure $ Just
+  $ DMap.singleton Quit (Identity ())
+handleNormal _ _ = pure Nothing
+
+handleInserting ::
+  ( Reflex t
+  , MonadSample t m
+  )
+  => Vty.Event
+  -> Direction
+  -> Dynamic t (Maybe (Tasks t))
+  -> Dynamic t Task
+  -> m (Maybe (DMap.DMap Change Identity))
+-- BUG: Shift+Enter Seems to cancel (like Esc)
+handleInserting (Vty.EvKey (Vty.KEnter) []) d tasks editTask = do
+  newSel <- sample $ current editTask
+  (sample $ current tasks) >>= \case
+    Nothing -> pure $ Just $ DMap.insert CreateLines (Identity newSel)
+      resetChangSet
+    Just ts -> do
+      oldSel <- sample $ current $ selected ts
+      pure $ Just $ DMap.union resetChangSet $ DMap.fromList
+        [ UpdateSelected ==> const newSel
+        , case d of
+            Up -> UpdateBottom ==> (oldSel :<|)
+            Down -> UpdateTop ==> (:|> oldSel)
+        ]
+handleInserting (Vty.EvKey (Vty.KEsc) []) _ _ _ = pure $ Just $ resetChangSet
+handleInserting (Vty.EvKey kk []) _ _ _ = pure $ updateTaskForKey kk
+handleInserting _ _ _ _ = pure Nothing
+
+handleEditing ::
+  ( Reflex t
+  , MonadSample t m
+  )
+  => Vty.Event
+  -> Dynamic t Task
+  -> m (Maybe (DMap.DMap Change Identity))
+-- BUG: Shift+Enter Seems to cancel (like Esc)
+handleEditing (Vty.EvKey (Vty.KEnter) []) editTask = do
+  newSel <- sample $ current editTask
+  pure $ Just $ DMap.insert UpdateSelected (Identity $ const newSel)
+    resetChangSet
+handleEditing (Vty.EvKey (Vty.KEsc) []) _ = pure $ Just $ resetChangSet
+handleEditing (Vty.EvKey kk []) _ = pure $ updateTaskForKey kk
+handleEditing _ _ = pure Nothing
 
 resetChangSet :: DMap.DMap Change Identity
 resetChangSet = DMap.fromList
