@@ -109,70 +109,124 @@ tasksView fileLines = do
         Inserting d -> handleInserting i d tasks editTask
         Editing -> handleEditing i editTask
   grout flex $ col $ do
-    void $ networkView $ ffor tasks $ \case
-      Nothing -> do
-        void $ networkView $ ffor mode $ \case
-          Normal -> grout (fixed 1) $ richText messageConf "File is empty"
-          Inserting _ -> grout (fixed 1)
-            $ richText selectedConf $ current $ displayTask <$> editTask
-          Editing -> grout (fixed 1)
-            $ richText selectedConf $ current $ displayTask <$> editTask
-        grout flex blank
-      Just ts -> do
-        rec
-          tackingTarget <- grout flex $ col $ trackingView tackingTarget $ do
-            r <- askRegion
-            void $ networkView $ traverse_ (line . constant . displayTask) <$> above ts
-            trackingTarget <- fmap join $ (=<<) (holdDyn r) $ networkView
-              $ ffor mode $ \case
-              Normal -> grout (fixed 1) $ do
-                richText selectedConf $ current $ displayTask <$> selected ts
-                askRegion
-              Inserting Up -> do
-                newTaskRegion <- grout (fixed 1) $ do
-                  richText selectedConf $ current $ displayTask <$> editTask
-                  askRegion
-                line $ current $ displayTask <$> selected ts
-                pure newTaskRegion
-              Inserting Down -> do
-                line $ current $ displayTask <$> selected ts
-                newTaskRegion <- grout (fixed 1) $ do
-                  richText selectedConf $ current $ displayTask <$> editTask
-                  askRegion
-                pure newTaskRegion
-              Editing -> grout (fixed 1) $ do
-                richText selectedConf $ current $ displayTask <$> editTask
-                askRegion
-            void $ networkView $ traverse_ (line . constant . displayTask) <$> below ts
-            pure trackingTarget
-        pure ()
-    line $ current $ join $ ffor mode $ \case
-      Normal -> fmap (sconcat . NEL.intersperse " | ")
-        $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
-        $ join $ ffor tasks $ maybe (pure []) $ \ts ->
-          ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
-            ("space - mark " <> case Tsk.completed sel of
-              True -> "incomplete"
-              False -> "complete"
-            :)
-            $ bool id ("j - move down" :) (not $ Seq.null blw)
-            $ bool id ("k - move up" :) (not $ Seq.null abv)
-            []
-      Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
-      Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
+    void $ networkView $ ffor tasks
+      $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
+    line $ current $ menuView mode tasks
   pure $ select changeEv Quit
+
+nonEmptyView ::
+  ( HasFocusReader t m
+  , HasDisplayRegion t m
+  , HasImageWriter t m
+  , HasInput t m
+  , HasLayout t m
+  , HasTheme t m
+  , PostBuild t m
+  , Adjustable t m
+  , NotReady t m
+  , MonadHold t m
+  , MonadFix m
+  )
+  => Dynamic t Mode
+  -> Dynamic t Task
+  -> Tasks t
+  -> m ()
+nonEmptyView mode editTask ts = mdo
+  tackingTarget <- grout flex $ col $ trackingView tackingTarget $ do
+    displayTasks $ above ts
+    gotTrackingTarget <- networkView $ ffor mode $ \case
+      Normal -> grout (fixed 1) $ do
+        selectedTaskView $ selected ts
+        askRegion
+      Inserting Up -> do
+        newTaskRegion <- grout (fixed 1) $ do
+          selectedTaskView editTask
+          askRegion
+        line $ current $ displayTask <$> selected ts
+        pure newTaskRegion
+      Inserting Down -> do
+        line $ current $ displayTask <$> selected ts
+        newTaskRegion <- grout (fixed 1) $ do
+          selectedTaskView editTask
+          askRegion
+        pure newTaskRegion
+      Editing -> grout (fixed 1) $ do
+        selectedTaskView editTask
+        askRegion
+    displayTasks $ below ts
+    fmap join $ askRegion
+      >>= flip holdDyn gotTrackingTarget
+  pure ()
+  where
+    displayTasks = void . networkView
+      . fmap (traverse_ $ line . constant . displayTask)
+
+emptyView ::
+  ( PostBuild t m
+  , Adjustable t m
+  , NotReady t m
+  , HasLayout t m
+  , HasInput t m
+  , HasImageWriter t m
+  , HasDisplayRegion t m
+  , HasFocusReader t m
+  , HasTheme t m
+  , MonadHold t m
+  , MonadFix m
+  )
+  => Dynamic t Mode
+  -> Dynamic t Task
+  -> m ()
+emptyView mode editTask = do
+  void $ grout (fixed 1) $ networkView $ ffor mode $ \case
+    Normal -> richText messageConf "File is empty"
+    Inserting _ -> selectedTaskView $ editTask
+    -- Should not be possible
+    Editing -> selectedTaskView $ editTask
+  grout flex blank
+  where
+    messageConf = RichTextConfig $ constant
+      $ Vty.currentAttr `Vty.withStyle` Vty.italic
+
+selectedTaskView ::
+  ( HasDisplayRegion t m
+  , HasImageWriter t m
+  , HasTheme t m
+  , MonadFix m
+  , MonadHold t m
+  , HasLayout t m
+  , HasInput t m
+  , HasFocusReader t m
+  )
+  => Dynamic t Task -> m ()
+selectedTaskView = grout (fixed 1)
+  . richText conf . current . fmap displayTask
+  where
+    conf = RichTextConfig $ constant
+      $ Vty.currentAttr `Vty.withStyle` Vty.underline
 
 displayTask :: Task -> T.Text
 displayTask (MkTask True  d) = "[x] " <> d
 displayTask (MkTask False d) = "[ ] " <> d
 
-selectedConf :: Reflex t => RichTextConfig t
-selectedConf = RichTextConfig $ constant
-  $ Vty.currentAttr `Vty.withStyle` Vty.underline
-
-messageConf :: Reflex t => RichTextConfig t
-messageConf = RichTextConfig $ constant
-  $ Vty.currentAttr `Vty.withStyle` Vty.italic
+menuView :: Reflex t
+  => Dynamic t Mode
+  -> Dynamic t (Maybe (Tasks t))
+  -> Dynamic t T.Text
+menuView mode tasks = join $ ffor mode $ \case
+  Normal -> fmap (sconcat . NEL.intersperse " | ")
+    $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
+    $ join $ ffor tasks $ maybe (pure []) $ \ts ->
+      ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
+        ("space - mark " <> case Tsk.completed sel of
+          True -> "incomplete"
+          False -> "complete"
+        :)
+        $ bool id ("j - move down" :) (not $ Seq.null blw)
+        $ bool id ("k - move up" :) (not $ Seq.null abv)
+        []
+  Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
+  Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
 
 handleNormal ::
   ( Reflex t
