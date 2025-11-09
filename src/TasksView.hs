@@ -102,12 +102,14 @@ tasksView fileLines = do
     -- editTask would update the mode and trigger bigger
     -- rebuilds, it then felt like it made sense to make it a Dynamic in the
     -- Inserting mode, but then that hkd did not work in ChangeMode
-    editTask <- foldDyn ($) (MkTask False "") $ select changeEv UpdateEditTask
+    editTask <- foldDyn ($) Tsk.def $ select changeEv UpdateEditTask
+    let
+      withTasks d f = sample (current tasks) >>= maybe d f
     changeEv <- fmap fan $ ffor input $ push $ \k -> do
       m <- sample $ current mode
       case (m, k) of
-        (Normal, Vty.EvKey (Vty.KChar 'k') []) -> (>>=) (sample $ current tasks)
-          . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
+        (Normal, Vty.EvKey (Vty.KChar 'k') []) -> withTasks (pure Nothing)
+          $ \ts -> (>>=) (sample $ current $ above ts)
           . NES.withNonEmpty (pure Nothing) $ \(top :||> newSel) -> do
             oldSel <- sample $ current $ selected ts
             pure $ Just $ DMap.fromList
@@ -115,8 +117,8 @@ tasksView fileLines = do
               , UpdateSelected ==> const newSel
               , UpdateBottom ==> (oldSel :<|)
               ]
-        (Normal, Vty.EvKey (Vty.KChar 'j') []) -> (>>=) (sample $ current tasks)
-          . maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ below ts)
+        (Normal, Vty.EvKey (Vty.KChar 'j') []) -> withTasks (pure Nothing)
+          $ \ts -> (>>=) (sample $ current $ below ts)
           . NES.withNonEmpty (pure Nothing) $ \(newSel :<|| bot) -> do
             oldSel <- sample $ current $ selected ts
             pure $ Just $ DMap.fromList
@@ -127,16 +129,15 @@ tasksView fileLines = do
         (Normal, Vty.EvKey (Vty.KChar 'I') []) ->
           pure $ Just $ DMap.fromList
             [ ChangeMode ==> Inserting Up
-            , UpdateEditTask ==> const (MkTask False "")
+            , UpdateEditTask ==> const Tsk.def
             ]
         (Normal, Vty.EvKey (Vty.KChar 'i') []) ->
           pure $ Just $ DMap.fromList
             [ ChangeMode ==> Inserting Down
-            , UpdateEditTask ==> const (MkTask False "")
+            , UpdateEditTask ==> const Tsk.def
             ]
-        (Normal, Vty.EvKey (Vty.KChar 'd') []) -> (>>=) (sample $ current tasks)
-          $ maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ below ts)
-          $ \case
+        (Normal, Vty.EvKey (Vty.KChar 'd') []) -> withTasks (pure Nothing)
+          $ \ts -> sample (current $ below ts) >>= \case
             (newSel :<| bot) -> pure $ Just $ DMap.fromList
               [ UpdateSelected ==> const newSel
               , UpdateBottom ==> const bot
@@ -148,11 +149,9 @@ tasksView fileLines = do
                 ]
               Seq.Empty -> DMap.singleton ClearLines $ Identity ()
         (Normal, Vty.EvKey (Vty.KChar ' ') []) -> pure $ Just
-          $ DMap.singleton UpdateSelected
-          $ Identity $ (\t@(MkTask c _) -> t{ Tsk.completed = not c })
-        (Normal, Vty.EvKey (Vty.KChar 'D') []) -> (>>=) (sample $ current tasks)
-          $ maybe (pure Nothing) $ \ts -> (>>=) (sample $ current $ above ts)
-          $ \case
+          $ DMap.singleton UpdateSelected $ Identity $ Tsk.toggleComplete
+        (Normal, Vty.EvKey (Vty.KChar 'D') []) -> withTasks (pure Nothing)
+          $ \ts -> sample (current $ above ts) >>= \case
             (top :|> newSel) -> pure $ Just $ DMap.fromList
               [ UpdateSelected ==> const newSel
               , UpdateTop ==> const top
@@ -163,8 +162,8 @@ tasksView fileLines = do
                 , UpdateBottom ==> const bot
                 ]
               Seq.Empty -> DMap.singleton ClearLines $ Identity ()
-        (Normal, Vty.EvKey (Vty.KChar 'e') []) -> (>>=) (sample $ current tasks)
-          $ maybe (pure Nothing) $ \ts -> do
+        (Normal, Vty.EvKey (Vty.KChar 'e') []) -> withTasks (pure Nothing)
+          $ \ts -> do
             sel <- (sample $ current $ selected ts)
             pure $ Just $ DMap.fromList
               [ ChangeMode ==> Editing
@@ -172,61 +171,30 @@ tasksView fileLines = do
               ]
         (Normal, Vty.EvKey (Vty.KChar 'q') []) ->
           pure $ Just $ DMap.singleton Quit (Identity ())
-        (Inserting _, Vty.EvKey (Vty.KEsc) []) ->
-          pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Normal
-            , UpdateEditTask ==> const (MkTask False "")
-            ]
+        (Inserting _, Vty.EvKey (Vty.KEsc) []) -> pure $ Just $ resetChangSet
         -- BUG: Shift+Enter Seems to cancel (like Esc)
         (Inserting d, Vty.EvKey (Vty.KEnter) []) -> do
-          (sample $ current tasks) >>= \case
-            Nothing -> do
-              newSel <- sample $ current editTask
-              pure $ Just $ DMap.fromList
-                [ ChangeMode ==> Normal
-                , UpdateEditTask ==> const (MkTask False "")
-                , CreateLines ==> newSel
-                ]
-            Just ts -> do
+          newSel <- sample $ current editTask
+          withTasks
+            (pure $ Just $ DMap.insert CreateLines (Identity newSel)
+              resetChangSet
+            )
+            $ \ts -> do
               oldSel <- sample $ current $ selected ts
-              newSel <- sample $ current editTask
-              pure $ Just $ DMap.fromList
-                [ ChangeMode ==> Normal
-                , UpdateEditTask ==> const (MkTask False "")
-                , UpdateSelected ==> const newSel
+              pure $ Just $ DMap.union resetChangSet $ DMap.fromList
+                [ UpdateSelected ==> const newSel
                 , case d of
                     Up -> UpdateBottom ==> (oldSel :<|)
                     Down -> UpdateTop ==> (:|> oldSel)
                 ]
-        (Inserting _, Vty.EvKey kk []) -> do
-          pure $ case kk of
-            Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity
-              (\t@(MkTask _ d) -> t{ Tsk.description = T.snoc d c })
-            Vty.KBS -> Just $ DMap.singleton UpdateEditTask $ Identity
-              (\t@(MkTask _ d) ->
-                t{ Tsk.description = maybe "" fst $ T.unsnoc d })
-            _ -> Nothing
-        (Editing, Vty.EvKey (Vty.KEsc) []) ->
-          pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Normal
-            , UpdateEditTask ==> const (MkTask False "")
-            ]
+        (Inserting _, Vty.EvKey kk []) -> pure $ updateTaskForKey kk
+        (Editing, Vty.EvKey (Vty.KEsc) []) -> pure $ Just $ resetChangSet
         -- BUG: Shift+Enter Seems to cancel (like Esc)
         (Editing, Vty.EvKey (Vty.KEnter) []) -> do
           newSel <- sample $ current editTask
-          pure $ Just $ DMap.fromList
-            [ ChangeMode ==> Normal
-            , UpdateEditTask ==> const (MkTask False "")
-            , UpdateSelected ==> const newSel
-            ]
-        (Editing, Vty.EvKey kk []) -> do
-          pure $ case kk of
-            Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity
-              (\t@(MkTask _ d) -> t{ Tsk.description = T.snoc d c })
-            Vty.KBS -> Just $ DMap.singleton UpdateEditTask $ Identity
-              (\t@(MkTask _ d) ->
-                t{ Tsk.description = maybe "" fst $ T.unsnoc d })
-            _ -> Nothing
+          pure $ Just $ DMap.insert UpdateSelected (Identity $ const newSel)
+            resetChangSet
+        (Editing, Vty.EvKey kk []) -> pure $ updateTaskForKey kk
         _ -> pure Nothing
   grout flex $ col $ do
     void $ networkView $ ffor tasks $ \case
@@ -281,10 +249,27 @@ tasksView fileLines = do
       Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
       Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
   pure $ select changeEv Quit
-  where
-    displayTask (MkTask True  d) = "[x] " <> d
-    displayTask (MkTask False d) = "[ ] " <> d
-    selectedConf = RichTextConfig
-      $ constant $ Vty.currentAttr `Vty.withStyle` Vty.underline
-    messageConf = RichTextConfig $ constant
-      $ Vty.currentAttr `Vty.withStyle` Vty.italic
+
+displayTask :: Task -> T.Text
+displayTask (MkTask True  d) = "[x] " <> d
+displayTask (MkTask False d) = "[ ] " <> d
+
+selectedConf :: Reflex t => RichTextConfig t
+selectedConf = RichTextConfig $ constant
+  $ Vty.currentAttr `Vty.withStyle` Vty.underline
+
+messageConf :: Reflex t => RichTextConfig t
+messageConf = RichTextConfig $ constant
+  $ Vty.currentAttr `Vty.withStyle` Vty.italic
+
+resetChangSet :: DMap.DMap Change Identity
+resetChangSet = DMap.fromList
+  [ ChangeMode ==> Normal
+  , UpdateEditTask ==> const Tsk.def
+  ]
+
+updateTaskForKey :: Vty.Key -> Maybe (DMap.DMap Change Identity)
+updateTaskForKey kk = case kk of
+  Vty.KChar c -> Just $ DMap.singleton UpdateEditTask $ Identity $ Tsk.append c
+  Vty.KBS -> Just $ DMap.singleton UpdateEditTask $ Identity $ Tsk.delete
+  _ -> Nothing
