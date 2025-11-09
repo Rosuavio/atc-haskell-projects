@@ -1,23 +1,18 @@
+{-# LANGUAGE TypeApplications #-}
 module Util
   ( forkWithCallback
   , getDefaultFile
   , getTasks
-  , isFileReadable
   , line
   ) where
 
 import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, handle, try)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Data.Bool (bool)
 import Data.Functor (void)
-import System.Directory.OsPath
-  ( Permissions (readable)
-  , XdgDirectory (XdgState)
-  , doesFileExist
-  , getPermissions
-  , getXdgDirectory
-  )
+import Data.Text (Text)
+import System.Directory.OsPath (XdgDirectory (XdgState), getXdgDirectory)
 import System.File.OsPath (withFile)
 import System.IO (IOMode (ReadMode))
 import System.OsPath (OsPath, unsafeEncodeUtf)
@@ -36,12 +31,15 @@ forkWithCallback f = liftIO . void . forkIO . (f >>=)
 getDefaultFile :: IO OsPath
 getDefaultFile = getXdgDirectory XdgState $ unsafeEncodeUtf "todo"
 
-isFileReadable :: OsPath -> IO Bool
-isFileReadable path = doesFileExist path
-  >>= bool (pure False) (readable <$> getPermissions path)
-
-getTasks :: OsPath -> IO (Maybe [Task])
-getTasks path = withFile path ReadMode (fmap TSK.parseDoc . T.hGetContents)
+getTasks :: OsPath -> IO (Either Text [Task])
+getTasks path = handle @SomeException
+  (const $ pure $ Left $ "failed to open " <> (T.pack $ show path)
+    <> " in read mode")
+  $ withFile path ReadMode $ \h ->
+    flip fmap (try @SomeException $ T.hGetContents h)
+    $ either (const $ Left $ "failed to read " <> (T.pack $ show path))
+    $ maybe (Left $ "failed to parse " <> (T.pack $ show path)) Right
+    . TSK.parseDoc
 
 -- TODO: Lines that are too long get the word that reaches the
 -- end of the line pushed to tne next line, behind (z-axis)

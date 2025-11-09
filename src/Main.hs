@@ -2,7 +2,6 @@ module Main
   ( main
   ) where
 
-import Data.Bool (bool)
 import Data.Functor (void)
 import Graphics.Vty.CrossPlatform (mkVty)
 import System.OsPath (decodeUtf)
@@ -31,14 +30,11 @@ main = do
         (forkWithCallback (T.pack <$> decodeUtf path) <$ pb)
         >>= hold placeHolderFileName
       gotTasks <- performEventAsync
-        (forkWithCallback (tryGetTasks path) <$ pb)
+        (forkWithCallback (getTasks path) <$ pb)
 
       fmap switchDyn $ networkHold (loadingView fileName) $ ffor gotTasks
-        $ maybe (quitablePrompt $ "Could not read tasks in " <> fileName <> ".")
-        tasksView
+        $ either (quitablePrompt . constant . T.pack) tasksView
   where
-    tryGetTasks path = isFileReadable path
-      >>= bool (pure Nothing) (getTasks path)
     placeHolderFileName = "default TODO file"
     loadingView filename = quitablePrompt $ "Loading " <> filename <> "..."
     quitablePrompt msg = grout flex $ col $ do
