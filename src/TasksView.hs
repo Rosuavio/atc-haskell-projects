@@ -82,20 +82,12 @@ tasksView ::
   => [Task] -> m (Event t ())
 tasksView fileLines = do
   rec
-    initialTasks <- case L.uncons fileLines of
-      Nothing -> pure Nothing
-      Just (t, ts) -> fmap Just $ Tasks
-        <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
-        <*> (foldDyn ($) t $ select changeEv UpdateSelected)
-        <*> (foldDyn ($) (Seq.fromList ts) $ select changeEv UpdateBottom)
-    tasks <- holdDyn initialTasks $ leftmost
-      [ Nothing <$ select changeEv ClearLines
-      , flip pushAlways (select changeEv CreateLines) $ \newLine -> fmap Just $
-        Tasks
-        <$> (foldDyn ($) Seq.Empty $ select changeEv UpdateTop)
-        <*> (foldDyn ($) newLine $ select changeEv UpdateSelected)
-        <*> (foldDyn ($) Seq.Empty $ select changeEv UpdateBottom)
-      ]
+    tasks <- holdMaybeTasks fileLines
+      (select changeEv UpdateTop)
+      (select changeEv UpdateSelected)
+      (select changeEv UpdateBottom)
+      (select changeEv CreateLines)
+      (select changeEv ClearLines)
     mode <- holdDyn Normal $ select changeEv ChangeMode
     -- TODO: Something feels wired about having this around in all contexts I
     -- tried to put this in the Inserting mode, but it would mean updates to the
@@ -113,6 +105,52 @@ tasksView fileLines = do
       $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
     line $ current $ menuView mode tasks
   pure $ select changeEv Quit
+
+holdMaybeTasks ::
+  ( Reflex t
+  , MonadHold t m
+  , MonadFix m
+  )
+  => [Task]
+  -> Event t (Seq Task -> Seq Task)
+  -> Event t (Task -> Task)
+  -> Event t (Seq Task -> Seq Task)
+  -> Event t Task
+  -> Event t b
+  -> m (Dynamic t (Maybe (Tasks t)))
+holdMaybeTasks
+  initialTasks
+  updateTop
+  updateSelected
+  updateBottom
+  createLines
+  clearLines
+  = do
+  i <- case L.uncons initialTasks of
+    Nothing -> pure Nothing
+    Just (t, ts) -> fmap Just $
+      holdTasks t (Seq.fromList ts) updateTop updateSelected updateBottom
+  holdDyn i $ leftmost
+    [ Nothing <$ clearLines
+    , flip pushAlways createLines $ \newLine -> fmap Just $
+      holdTasks newLine Seq.Empty updateTop updateSelected updateBottom
+    ]
+
+holdTasks ::
+  ( Reflex t
+  , MonadHold t m
+  , MonadFix m
+  )
+  => Task
+  -> Seq Task
+  -> Event t (Seq Task -> Seq Task)
+  -> Event t (Task -> Task)
+  -> Event t (Seq Task -> Seq Task)
+  -> m (Tasks t)
+holdTasks x xs updateTop updateSelected updateBottom = Tasks
+  <$> (foldDyn ($) Seq.Empty updateTop)
+  <*> (foldDyn ($) x updateSelected)
+  <*> (foldDyn ($) xs updateBottom)
 
 nonEmptyView ::
   ( HasFocusReader t m
