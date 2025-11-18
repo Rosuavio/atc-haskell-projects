@@ -12,6 +12,7 @@ import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Bool (bool)
 import Data.Dependent.Sum ((==>))
+import Data.Either (fromRight)
 import Data.Foldable (traverse_)
 import Data.Functor (void, (<&>))
 import Data.Functor.Identity (Identity (Identity))
@@ -64,6 +65,7 @@ data Change a where
   ChangeMode :: Change Mode
   UpdateEditTask :: Change (Task -> Task)
   Quit :: Change ()
+  ClearError :: Change ()
 
 deriveGEq ''Change
 deriveGCompare ''Change
@@ -102,6 +104,8 @@ tasksView path = do
         (select changeEv UpdateBottom)
         (select changeEv CreateLines)
         (select changeEv ClearLines)
+      errorMsg <- holdDyn (leftToMaybe getTasksRez)
+        $ Nothing <$ select changeEv ClearError
       mode <- holdDyn Normal $ select changeEv ChangeMode
       -- TODO: Something feels wired about having this around in all contexts I
       -- tried to put this in the Inserting mode, but it would mean updates to the
@@ -110,14 +114,19 @@ tasksView path = do
       -- Inserting mode, but then that hkd did not work in ChangeMode
       editTask <- foldDyn ($) Tsk.def $ select changeEv UpdateEditTask
       changeEv <- fmap fan $ ffor input $ push $ \i ->
-        (sample $ current mode) >>= \case
-          Normal -> handleNormal i tasks
-          Inserting d -> handleInserting i d tasks editTask
-          Editing -> handleEditing i editTask
+        (sample $ current errorMsg) >>= \case
+          Just _ -> pure $ Just $ DMap.singleton ClearError $ Identity ()
+          Nothing -> (sample $ current mode) >>= \case
+            Normal -> handleNormal i tasks
+            Inserting d -> handleInserting i d tasks editTask
+            Editing -> handleEditing i editTask
     grout flex $ col $ do
-      void $ networkView $ ffor tasks
-        $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
-      line $ current $ menuView mode tasks
+      grout flex $ do
+        void $ networkView $ ffor tasks
+          $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
+        void $ networkView $ ffor errorMsg $ maybe blank
+          $ boxStatic def . grout flex . text . constant . ("Error: " <>)
+      line $ current $ menuView mode tasks errorMsg
     pure $ select changeEv Quit
 
 holdMaybeTasks ::
@@ -264,21 +273,24 @@ displayTask (MkTask False d) = "[ ] " <> d
 menuView :: Reflex t
   => Dynamic t Mode
   -> Dynamic t (Maybe (Tasks t))
+  -> Dynamic t (Maybe T.Text)
   -> Dynamic t T.Text
-menuView mode tasks = join $ ffor mode $ \case
-  Normal -> fmap (sconcat . NEL.intersperse " | ")
-    $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
-    $ join $ ffor tasks $ maybe (pure []) $ \ts ->
-      ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
-        ("space - mark " <> case Tsk.completed sel of
-          True -> "incomplete"
-          False -> "complete"
-        :)
-        $ bool id ("j - move down" :) (not $ Seq.null blw)
-        $ bool id ("k - move up" :) (not $ Seq.null abv)
-        []
-  Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
-  Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
+menuView mode tasks e = join $ ffor e $ \case
+  Just _ -> pure "Mode: Error | Any key - dismiss"
+  Nothing -> join $ ffor mode $ \case
+    Normal -> fmap (sconcat . NEL.intersperse " | ")
+      $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
+      $ join $ ffor tasks $ maybe (pure []) $ \ts ->
+        ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
+          ("space - mark " <> case Tsk.completed sel of
+            True -> "incomplete"
+            False -> "complete"
+          :)
+          $ bool id ("j - move down" :) (not $ Seq.null blw)
+          $ bool id ("k - move up" :) (not $ Seq.null abv)
+          []
+    Inserting _ -> pure $ "Mode: Inserting | Esc - cancel | Enter - submit"
+    Editing -> pure $ "Mode: Editing | Esc - cancel | Enter - submit"
 
 handleNormal ::
   ( Reflex t

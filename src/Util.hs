@@ -3,6 +3,7 @@ module Util
   ( forkWithCallback
   , getDefaultFile
   , getTasks
+  , leftToMaybe
   , line
   ) where
 
@@ -57,3 +58,7 @@ line ::
   => Behavior t T.Text
   -> m ()
 line = grout (fixed 1) . text
+
+leftToMaybe :: Either a b -> Maybe a
+leftToMaybe (Left a) = Just a
+leftToMaybe _ = Nothing
