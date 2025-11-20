@@ -19,10 +19,11 @@ import Data.Functor.Identity (Identity (Identity))
 import Data.GADT.Compare.TH (deriveGCompare, deriveGEq)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Semigroup (Semigroup (sconcat))
-import Data.Sequence (Seq ((:<|), (:|>)))
+import Data.Sequence (Seq ((:<|), (:|>)), (<|), (><))
 import Data.Sequence.NonEmpty (NESeq ((:<||), (:||>)))
 import System.OsPath (OsPath, decodeUtf)
 import Task (Task (MkTask))
+import Witherable (Filterable (catMaybes))
 
 import qualified Data.Dependent.Map as DMap
 import qualified Data.List as L
@@ -66,6 +67,7 @@ data Change a where
   UpdateEditTask :: Change (Task -> Task)
   Quit :: Change ()
   ClearError :: Change ()
+  Save :: Change (Maybe (Seq Task))
 
 deriveGEq ''Change
 deriveGCompare ''Change
@@ -104,8 +106,10 @@ tasksView path = do
         (select changeEv UpdateBottom)
         (select changeEv CreateLines)
         (select changeEv ClearLines)
-      errorMsg <- holdDyn (leftToMaybe getTasksRez)
-        $ Nothing <$ select changeEv ClearError
+      errorMsg <- holdDyn (leftToMaybe getTasksRez) $ leftmost
+        [ Nothing <$ select changeEv ClearError
+        , Just <$> catMaybes writeRez
+        ]
       mode <- holdDyn Normal $ select changeEv ChangeMode
       -- TODO: Something feels wired about having this around in all contexts I
       -- tried to put this in the Inserting mode, but it would mean updates to the
@@ -120,6 +124,8 @@ tasksView path = do
             Normal -> handleNormal i tasks
             Inserting d -> handleInserting i d tasks editTask
             Editing -> handleEditing i editTask
+      writeRez <- performEventAsync $ ffor (select changeEv Save) $ forkWithCallback .
+        (writeTasks path)
     grout flex $ col $ do
       grout flex $ do
         void $ networkView $ ffor tasks
@@ -279,7 +285,7 @@ menuView mode tasks e = join $ ffor e $ \case
   Just _ -> pure "Mode: Error | Any key - dismiss"
   Nothing -> join $ ffor mode $ \case
     Normal -> fmap (sconcat . NEL.intersperse " | ")
-      $ (<*>) (pure ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up" :|))
+      $ (<*>) (pure ("Mode: Normal | q - quit | s - save | i/I - insert below/above | d/D - delete & move down/up" :|))
       $ join $ ffor tasks $ maybe (pure []) $ \ts ->
         ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
           ("space - mark " <> case Tsk.completed sel of
@@ -367,6 +373,13 @@ handleNormal (Vty.EvKey (Vty.KChar 'e') []) dynTs =
       ]
 handleNormal (Vty.EvKey (Vty.KChar 'q') []) _ = pure $ Just
   $ DMap.singleton Quit (Identity ())
+handleNormal (Vty.EvKey (Vty.KChar 's') []) dynTs =
+  (>>=) (sample $ current dynTs) $ maybe
+  (pure $ Just $ DMap.singleton Save $ Identity Nothing)
+  $ \ts -> fmap (Just . DMap.singleton Save . Identity . Just)
+  $ liftA2 (><) (sample $ current $ above ts)
+  $ liftA2 (<|) (sample $ current $ selected ts)
+  (sample $ current $ below ts)
 handleNormal _ _ = pure Nothing
 
 handleInserting ::

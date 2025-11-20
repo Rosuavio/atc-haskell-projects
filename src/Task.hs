@@ -4,11 +4,14 @@ module Task
   , def
   , delete
   , parseDoc
+  , tasksToCommonmark
   , toggleComplete
   ) where
 
+import Data.Foldable (Foldable (toList))
 import Data.Text (Text)
 
+import qualified Data.List as L
 import qualified Data.Text as T
 
 import CMarkGFM
@@ -22,6 +25,17 @@ parseDoc :: Text -> Maybe [Task]
 parseDoc t = case commonmarkToNode [] [extTaskList] t of
   (Node _ DOCUMENT []) -> Just []
   (Node _ DOCUMENT [Node _ (LIST _) c]) -> traverse fromTaskListItem c
+  _ -> Nothing
+
+tasksToCommonmark :: Traversable f => f Task -> Maybe Text
+tasksToCommonmark t =
+  traverse (\(MkTask s tt) -> Node Nothing (TASKLIST s) <$> toDocNodes tt) t
+  >>= Just . nodeToCommonmark [] Nothing . Node Nothing DOCUMENT . L.singleton
+    . Node Nothing (LIST $ ListAttributes BULLET_LIST True 0 PERIOD_DELIM) . toList
+
+toDocNodes :: Text -> Maybe [Node]
+toDocNodes t = case commonmarkToNode [] [extTaskList] t of
+  (Node _ DOCUMENT c) -> Just c
   _ -> Nothing
 
 fromTaskListItem :: Node -> Maybe Task

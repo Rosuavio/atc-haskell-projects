@@ -5,6 +5,7 @@ module Util
   , getTasks
   , leftToMaybe
   , line
+  , writeTasks
   ) where
 
 import Control.Concurrent (forkIO)
@@ -15,7 +16,7 @@ import Data.Functor (void)
 import Data.Text (Text)
 import System.Directory.OsPath (XdgDirectory (XdgState), getXdgDirectory)
 import System.File.OsPath (withFile)
-import System.IO (IOMode (ReadMode))
+import System.IO (IOMode (ReadMode, WriteMode))
 import System.OsPath (OsPath, unsafeEncodeUtf)
 import Task (Task)
 
@@ -41,6 +42,20 @@ getTasks path = handle @SomeException
     $ either (const $ Left $ "failed to read " <> (T.pack $ show path))
     $ maybe (Left $ "failed to parse " <> (T.pack $ show path)) Right
     . TSK.parseDoc
+
+writeTasks :: Traversable f => OsPath -> Maybe (f Task) -> IO (Maybe Text)
+writeTasks path mTs = handle @SomeException
+  (const $ pure $ Just $ "failed to open " <> (T.pack $ show path)
+    <> " in write mode")
+  $ withFile path WriteMode $ \h ->
+  let handledPutStr t = handle @SomeException
+        (const $ pure $ Just $ "failed to write to " <> (T.pack $ show path))
+        $ Nothing <$ T.hPutStr h t
+  in case mTs of
+    Nothing -> handledPutStr ""
+    Just ts -> case TSK.tasksToCommonmark ts of
+      Nothing -> pure $ Just "failed to convert tasks to markdown"
+      Just cm -> handledPutStr cm
 
 -- TODO: Lines that are too long get the word that reaches the
 -- end of the line pushed to tne next line, behind (z-axis)

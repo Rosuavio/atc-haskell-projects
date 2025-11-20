@@ -38,4 +38,5 @@ executable todo-manager
     reflex-vty,
     text,
     vty,
-    vty-crossplatform
+    vty-crossplatform,
+    witherable
