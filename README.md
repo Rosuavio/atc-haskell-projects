@@ -50,8 +50,8 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 - [ ] Provide command-line options to manage tasks without entering an interactive mode (e.g., `todo add "Buy groceries"`).
 
 ### User Interface:
-- [ ] A simple and intuitive command-line interface.
-- [ ] Display a help menu when requested (`--help` or `-h`), listing all available commands.
+- [x] A simple and intuitive command-line interface.
+- [x] Display a help menu when requested (`--help` or `-h`), listing all available commands.
 
 ### Error Handling:
 - [ ] The application should handle errors gracefully, providing user-friendly messages (e.g., when trying to mark a non-existent task as complete).

@@ -34,6 +34,7 @@ executable todo-manager
     filepath >= 1.5.2,
     file-io,
     nonempty-containers,
+    optparse-applicative,
     reflex,
     reflex-vty,
     text,
