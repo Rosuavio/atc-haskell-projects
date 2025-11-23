@@ -100,6 +100,9 @@ tasksView path = do
   fmap switchDyn $ networkHold (loadingView fileName) $ ffor getTasksRezEv
     $ \getTasksRez -> do
     rec
+      unsavedChanges <- holdDyn False never
+      let
+        aaa = gate (current unsavedChanges) $ select changeEv Quit
       tasks <- holdMaybeTasks (fromRight [] getTasksRez)
         (select changeEv UpdateTop)
         (select changeEv UpdateSelected)
@@ -121,7 +124,7 @@ tasksView path = do
         (sample $ current errorMsg) >>= \case
           Just _ -> pure $ Just $ DMap.singleton ClearError $ Identity ()
           Nothing -> (sample $ current mode) >>= \case
-            Normal -> handleNormal i tasks
+            Normal -> handleNormal i tasks unsavedChanges
             Inserting d -> handleInserting i d tasks editTask
             Editing -> handleEditing i editTask
       writeRez <- performEventAsync $ ffor (select changeEv Save) $ forkWithCallback .
@@ -132,7 +135,7 @@ tasksView path = do
           $ maybe (emptyView mode editTask) $ nonEmptyView mode editTask
         void $ networkView $ ffor errorMsg $ maybe blank
           $ boxStatic def . grout flex . text . constant . ("Error: " <>)
-      line $ current $ menuView mode tasks errorMsg
+      line $ current $ menuView mode tasks errorMsg unsavedChanges
     pure $ select changeEv Quit
 
 holdMaybeTasks ::
@@ -280,18 +283,20 @@ menuView :: Reflex t
   => Dynamic t Mode
   -> Dynamic t (Maybe (Tasks t))
   -> Dynamic t (Maybe T.Text)
+  -> Dynamic t Bool
   -> Dynamic t T.Text
-menuView mode tasks e = join $ ffor e $ \case
+menuView mode tasks e areChanges = join $ ffor e $ \case
   Just _ -> pure "Mode: Error | Any key - dismiss"
   Nothing -> join $ ffor mode $ \case
-    Normal -> fmap (sconcat . NEL.intersperse " | ")
-      $ (<*>) (pure ("Mode: Normal | q - quit | s - save | i/I - insert below/above | d/D - delete & move down/up" :|))
-      $ join $ ffor tasks $ maybe (pure []) $ \ts ->
+    Normal -> ("Mode: Normal | q - quit | i/I - insert below/above | d/D - delete & move down/up | " <>)
+      $ join $ ffor2 areChanges tasks $ \c -> maybe (pure "") $ \ts ->
         ffor3 (selected ts) (above ts) (below ts) $ \sel abv blw ->
-          ("space - mark " <> case Tsk.completed sel of
+          sconcat $ NEL.intersperse " | "
+          $ ("space - mark " <> case Tsk.completed sel of
             True -> "incomplete"
             False -> "complete"
-          :)
+          :|)
+          $ bool id ("s - save" :) c
           $ bool id ("j - move down" :) (not $ Seq.null blw)
           $ bool id ("k - move up" :) (not $ Seq.null abv)
           []
@@ -304,8 +309,9 @@ handleNormal ::
   )
   => Vty.Event
   -> Dynamic t (Maybe (Tasks t))
+  -> Dynamic t Bool
   -> m (Maybe (DMap.DMap Change Identity))
-handleNormal (Vty.EvKey (Vty.KChar 'k') []) dynTs =
+handleNormal (Vty.EvKey (Vty.KChar 'k') []) dynTs _ =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
   $ \ts -> (>>=) (sample $ current $ above ts) . NES.withNonEmpty (pure Nothing)
   $ \(top :||> newSel) -> do
@@ -315,7 +321,7 @@ handleNormal (Vty.EvKey (Vty.KChar 'k') []) dynTs =
       , UpdateSelected ==> const newSel
       , UpdateBottom ==> (oldSel :<|)
       ]
-handleNormal (Vty.EvKey (Vty.KChar 'j') []) dynTs =
+handleNormal (Vty.EvKey (Vty.KChar 'j') []) dynTs _ =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
   $ \ts -> (>>=) (sample $ current $ below ts) . NES.withNonEmpty (pure Nothing)
   $ \(newSel :<|| bot) -> do
@@ -325,17 +331,17 @@ handleNormal (Vty.EvKey (Vty.KChar 'j') []) dynTs =
       , UpdateSelected ==> const newSel
       , UpdateBottom ==> const bot
       ]
-handleNormal (Vty.EvKey (Vty.KChar 'I') []) _ = pure $ Just
+handleNormal (Vty.EvKey (Vty.KChar 'I') []) _ _ = pure $ Just
   $ DMap.fromList
   [ ChangeMode ==> Inserting Up
   , UpdateEditTask ==> const Tsk.def
   ]
-handleNormal (Vty.EvKey (Vty.KChar 'i') []) _ = pure $ Just
+handleNormal (Vty.EvKey (Vty.KChar 'i') []) _ _ = pure $ Just
   $ DMap.fromList
   [ ChangeMode ==> Inserting Down
   , UpdateEditTask ==> const Tsk.def
   ]
-handleNormal (Vty.EvKey (Vty.KChar 'd') []) dynTs =
+handleNormal (Vty.EvKey (Vty.KChar 'd') []) dynTs _ =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
   $ \ts -> sample (current $ below ts) >>= \case
     (newSel :<| bot) -> pure $ Just $ DMap.fromList
@@ -348,9 +354,9 @@ handleNormal (Vty.EvKey (Vty.KChar 'd') []) dynTs =
         , UpdateTop ==> const top
         ]
       Seq.Empty -> DMap.singleton ClearLines $ Identity ()
-handleNormal (Vty.EvKey (Vty.KChar ' ') []) _  = pure $ Just
+handleNormal (Vty.EvKey (Vty.KChar ' ') []) _  _ = pure $ Just
   $ DMap.singleton UpdateSelected $ Identity $ Tsk.toggleComplete
-handleNormal (Vty.EvKey (Vty.KChar 'D') []) dynTs =
+handleNormal (Vty.EvKey (Vty.KChar 'D') []) dynTs _ =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
   $ \ts -> sample (current $ above ts) >>= \case
     (top :|> newSel) -> pure $ Just $ DMap.fromList
@@ -363,7 +369,7 @@ handleNormal (Vty.EvKey (Vty.KChar 'D') []) dynTs =
         , UpdateBottom ==> const bot
         ]
       Seq.Empty -> DMap.singleton ClearLines $ Identity ()
-handleNormal (Vty.EvKey (Vty.KChar 'e') []) dynTs =
+handleNormal (Vty.EvKey (Vty.KChar 'e') []) dynTs _ =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
   $ \ts -> do
     sel <- (sample $ current $ selected ts)
@@ -371,16 +377,17 @@ handleNormal (Vty.EvKey (Vty.KChar 'e') []) dynTs =
       [ ChangeMode ==> Editing
       , UpdateEditTask ==> const sel
       ]
-handleNormal (Vty.EvKey (Vty.KChar 'q') []) _ = pure $ Just
+handleNormal (Vty.EvKey (Vty.KChar 'q') []) _ _ = pure $ Just
   $ DMap.singleton Quit (Identity ())
-handleNormal (Vty.EvKey (Vty.KChar 's') []) dynTs =
-  (>>=) (sample $ current dynTs) $ maybe
+handleNormal (Vty.EvKey (Vty.KChar 's') []) dynTs areChanges =
+  (>>=) (sample $ current areChanges) $ bool (pure Nothing)
+  $ (>>=) (sample $ current dynTs) $ maybe
   (pure $ Just $ DMap.singleton Save $ Identity Nothing)
   $ \ts -> fmap (Just . DMap.singleton Save . Identity . Just)
   $ liftA2 (><) (sample $ current $ above ts)
   $ liftA2 (<|) (sample $ current $ selected ts)
   (sample $ current $ below ts)
-handleNormal _ _ = pure Nothing
+handleNormal _ _ _ = pure Nothing
 
 handleInserting ::
   ( Reflex t
