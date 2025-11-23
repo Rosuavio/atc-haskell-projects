@@ -62,7 +62,7 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
 
 ## Acceptance Criteria:
 - [ ] **Task Management:**
-  - [ ] The user can successfully add a new task, view it, mark it as complete, edit it, and delete it.
+  - [x] The user can successfully add a new task, view it, mark it as complete, edit it, and delete it.
   - [ ] Tasks persist between sessions (i.e., closing and reopening the application should not lose data).
 
 - [ ] **Advanced Features (if implemented):**
@@ -70,11 +70,11 @@ Test the CLI by typing in commands and interacting with the recursive prompt.
   - [ ] Tasks with due dates are sorted correctly when the user requests it.
 
 - [ ] **User Interface:**
-  - [ ] The help menu is clear and correctly displays all available commands.
-  - [ ] Commands are intuitive and easy to use.
+  - [x] The help menu is clear and correctly displays all available commands.
+  - [x] Commands are intuitive and easy to use.
 
-- [ ] **Error Handling:**
-  - [ ] The application should not crash or behave unexpectedly when given invalid input (e.g., marking a non-existent task as complete).
+- [x] **Error Handling:**
+  - [x] The application should not crash or behave unexpectedly when given invalid input (e.g., marking a non-existent task as complete).
 
 - [ ] **Code Quality:**
   - [ ] The code should be clean, well-documented, and follow Haskell best practices.
