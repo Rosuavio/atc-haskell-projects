@@ -58,11 +58,12 @@ data Tasks t = Tasks
  }
 
 data Change a where
-  UpdateTop :: Change (Seq Task -> Seq Task)
-  UpdateSelected :: Change (Task -> Task)
-  UpdateBottom :: Change (Seq Task -> Seq Task)
+  MoveUp :: Change (NESeq Task)
+  MoveDown :: Change (NESeq Task)
   ClearLines :: Change ()
   CreateLines :: Change Task
+  Insert :: Change (Direction, Task)
+  EditSelected :: Change Task
   ChangeMode :: Change Mode
   UpdateEditTask :: Change (Task -> Task)
   Quit :: Change ()
@@ -122,7 +123,7 @@ tasksView path = do
           Just _ -> pure $ Just $ DMap.singleton ClearError $ Identity ()
           Nothing -> (sample $ current mode) >>= \case
             Normal -> handleNormal i tasks
-            Inserting d -> handleInserting i d tasks editTask
+            Inserting d -> handleInserting i d editTask
             Editing -> handleEditing i editTask
       writeRez <- performEventAsync $ ffor (select changeEv Save) $ forkWithCallback .
         (writeTasks path)
@@ -307,24 +308,12 @@ handleNormal ::
   -> m (Maybe (DMap.DMap Change Identity))
 handleNormal (Vty.EvKey (Vty.KChar 'k') []) dynTs =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
-  $ \ts -> (>>=) (sample $ current $ above ts) . NES.withNonEmpty (pure Nothing)
-  $ \(top :||> newSel) -> do
-    oldSel <- sample $ current $ selected ts
-    pure $ Just $ DMap.fromList
-      [ UpdateTop ==> const top
-      , UpdateSelected ==> const newSel
-      , UpdateBottom ==> (oldSel :<|)
-      ]
+  $ \ts -> ffor (sample $ current $ above ts) . NES.withNonEmpty (Nothing)
+  $ Just . DMap.singleton MoveUp . Identity
 handleNormal (Vty.EvKey (Vty.KChar 'j') []) dynTs =
   (>>=) (sample $ current dynTs) $ maybe (pure Nothing)
-  $ \ts -> (>>=) (sample $ current $ below ts) . NES.withNonEmpty (pure Nothing)
-  $ \(newSel :<|| bot) -> do
-    oldSel <- sample $ current $ selected ts
-    pure $ Just $ DMap.fromList
-      [ UpdateTop ==> (:|> oldSel)
-      , UpdateSelected ==> const newSel
-      , UpdateBottom ==> const bot
-      ]
+  $ \ts -> ffor (sample $ current $ below ts) . NES.withNonEmpty (Nothing)
+  $ Just . DMap.singleton MoveDown . Identity
 handleNormal (Vty.EvKey (Vty.KChar 'I') []) _ = pure $ Just
   $ DMap.fromList
   [ ChangeMode ==> Inserting Up
@@ -388,26 +377,16 @@ handleInserting ::
   )
   => Vty.Event
   -> Direction
-  -> Dynamic t (Maybe (Tasks t))
   -> Dynamic t Task
   -> m (Maybe (DMap.DMap Change Identity))
 -- BUG: Shift+Enter Seems to cancel (like Esc)
-handleInserting (Vty.EvKey (Vty.KEnter) []) d tasks editTask = do
+handleInserting (Vty.EvKey (Vty.KEnter) []) d editTask = do
   newSel <- sample $ current editTask
-  (sample $ current tasks) >>= \case
-    Nothing -> pure $ Just $ DMap.insert CreateLines (Identity newSel)
+  pure $ Just $ DMap.insert Insert (Identity (d, newSel))
       resetChangSet
-    Just ts -> do
-      oldSel <- sample $ current $ selected ts
-      pure $ Just $ DMap.union resetChangSet $ DMap.fromList
-        [ UpdateSelected ==> const newSel
-        , case d of
-            Up -> UpdateBottom ==> (oldSel :<|)
-            Down -> UpdateTop ==> (:|> oldSel)
-        ]
-handleInserting (Vty.EvKey (Vty.KEsc) []) _ _ _ = pure $ Just $ resetChangSet
-handleInserting (Vty.EvKey kk []) _ _ _ = pure $ updateTaskForKey kk
-handleInserting _ _ _ _ = pure Nothing
+handleInserting (Vty.EvKey (Vty.KEsc) []) _ _ = pure $ Just $ resetChangSet
+handleInserting (Vty.EvKey kk []) _ _ = pure $ updateTaskForKey kk
+handleInserting _ _ _ = pure Nothing
 
 handleEditing ::
   ( Reflex t
@@ -419,7 +398,7 @@ handleEditing ::
 -- BUG: Shift+Enter Seems to cancel (like Esc)
 handleEditing (Vty.EvKey (Vty.KEnter) []) editTask = do
   newSel <- sample $ current editTask
-  pure $ Just $ DMap.insert UpdateSelected (Identity $ const newSel)
+  pure $ Just $ DMap.insert EditSelected (Identity newSel)
     resetChangSet
 handleEditing (Vty.EvKey (Vty.KEsc) []) _ = pure $ Just $ resetChangSet
 handleEditing (Vty.EvKey kk []) _ = pure $ updateTaskForKey kk
