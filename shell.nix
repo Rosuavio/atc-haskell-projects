@@ -2,11 +2,9 @@
 { pkgs ? import <nixpkgs> {} }:
 
 pkgs.mkShell {
-  buildInputs = [
+  packages = [
     pkgs.haskellPackages.ghc
     pkgs.haskellPackages.cabal-install
-  ];
-  nativeBuildInputs = [
     pkgs.haskellPackages.haskell-language-server
   ];
 
