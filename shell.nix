@@ -7,6 +7,7 @@ in pkgs.mkShell {
     pkgs.haskellPackages.cabal-install
     pkgs.haskellPackages.haskell-language-server
     pkgs.npins
+    pkgs.ghciwatch
   ];
 
   shellHook = ''
